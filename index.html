@@ -17,9 +17,9 @@
     .gold-bg { background-color: #d4af37; }
   </style>
   <script>
-    // Supabase Konfigurace
+    // Supabase Konfigurace (Opravený Publishable klíč)
     const SUPABASE_URL = "https://tnvftxeohsxwazsnwfip.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_5Q1t0ZNLRaL7lBaEsjRCPw_tDmAs..."; 
+    const SUPABASE_ANON_KEY = "sb_publishable_5Q1t0ZNLRal7lBaEsjRCPw_tDmAs_PE"; 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const defaultUsers = [
@@ -53,7 +53,7 @@
 
         if (data && data.payload) {
           const p = data.payload;
-          users = p.users || defaultUsers;
+          users = p.users && p.users.length > 0 ? p.users : defaultUsers;
           characters = p.characters || [];
           games = p.games || [];
           polls = p.polls || [];
@@ -413,12 +413,10 @@
       const poll = polls.find(p => p.id === pollId);
       if (!poll) return;
 
-      // Odstranění předchozího hlasu uživatele
       poll.options.forEach(opt => {
         opt.votes = opt.votes.filter(uId => uId !== currentUser.id);
       });
 
-      // Přidání nového hlasu
       poll.options[optionIndex].votes.push(currentUser.id);
       await saveState();
       renderPolls();
@@ -513,7 +511,7 @@
       <!-- TAB: CHARACTERS -->
       <div id="tab-content-characters" class="tab-content">
         <div id="char-upload-admin-area" class="hidden">
-          <label class="block text-sm font-semibold text-yellow-400 mb-2">Nahranat JSON Script postav:</label>
+          <label class="block text-sm font-semibold text-yellow-400 mb-2">Nahrát JSON Script postav:</label>
           <input type="file" accept=".json" onchange="uploadCharactersScript(event)" class="text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-yellow-500 file:text-black hover:file:bg-yellow-400 cursor-pointer">
         </div>
         <div id="characters-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
