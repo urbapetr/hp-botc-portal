@@ -16,7 +16,6 @@
     .gold-bg { background-color: #d4af37; }
   </style>
   <script>
-    // Supabase Konfigurace s tvým novým klíčem
     const SUPABASE_URL = "https://tnvftxeohsxwazsnwfip.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_to3lCwqIAYz3vQgq0gVK-w_Y4nLAbTN"; 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -37,6 +36,7 @@
     let activeTab = 'characters';
 
     let tempGamePlayers = [];
+    let tempGameCharacters = []; // Dočasné postavy pro právě vytvářenou hru
 
     async function loadStateFromCloud() {
       try {
@@ -140,8 +140,9 @@
       if (activeTab === 'polls') renderPolls();
     }
 
-    // --- ANKETY (MODAL + AŽ 10 MOŽNOSTÍ + MAX HLASŮ) ---
+    // --- ANKETY ---
     function openPollModal() {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
       document.getElementById('poll-modal').classList.remove('hidden');
       document.getElementById('poll-options-container').innerHTML = '';
       addPollOptionInput();
@@ -171,6 +172,7 @@
 
     async function savePoll(e) {
       e.preventDefault();
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
       const title = document.getElementById('poll-title-input').value.trim();
       const maxVotes = parseInt(document.getElementById('poll-max-votes').value) || 1;
       const optionInputs = document.querySelectorAll('.poll-option-input');
@@ -190,6 +192,15 @@
       await saveState();
       closePollModal();
       renderPolls();
+    }
+
+    async function deletePoll(pollId) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      if (confirm('Opravdu chcete smazat tuto anketu?')) {
+        polls = polls.filter(p => p.id !== pollId);
+        await saveState();
+        renderPolls();
+      }
     }
 
     async function votePoll(pollId, optionIndex) {
@@ -225,8 +236,9 @@
       }
 
       container.innerHTML = polls.map(p => `
-        <div class="bg-gray-900 border border-yellow-600/30 p-5 rounded-xl mb-4 shadow-lg">
-          <div class="flex justify-between items-start mb-2">
+        <div class="bg-gray-900 border border-yellow-600/30 p-5 rounded-xl mb-4 shadow-lg relative">
+          ${isAdmin ? `<button onclick="deletePoll(${p.id})" class="absolute top-4 right-4 text-red-400 hover:text-red-300 text-sm" title="Smazat anketu"><i class="fa-solid fa-trash"></i></button>` : ''}
+          <div class="flex justify-between items-start mb-2 pr-8">
             <h3 class="text-lg font-bold text-white magic-font">${p.title}</h3>
             <span class="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 px-2.5 py-1 rounded-full font-semibold">Max ${p.maxVotes} hlas/ů</span>
           </div>
@@ -245,16 +257,42 @@
       `).join('');
     }
 
-    // --- HISTORIE HER (MODAL + AŽ 20 STUDENTŮ + AUTO VYHODNOCENÍ) ---
+    // --- HISTORIE HER ---
     function openGameModal() {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
       document.getElementById('game-modal').classList.remove('hidden');
       tempGamePlayers = [];
+      tempGameCharacters = [...characters]; // Načtení globálních postav jako výchozích
       renderModalPlayersRows();
     }
 
     function closeGameModal() {
       document.getElementById('game-modal').classList.add('hidden');
       document.getElementById('add-game-form').reset();
+    }
+
+    function handleGameScriptUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const json = JSON.parse(evt.target.result);
+          if (Array.isArray(json)) {
+            tempGameCharacters = json.filter(item => item && item.name).map(item => ({
+              name: item.name,
+              team: item.team || 'townsfolk'
+            }));
+            renderModalPlayersRows();
+            alert(`Scénář úspěšně nahrán (${tempGameCharacters.length} postav)!`);
+          } else {
+            alert('JSON nemá správný formát pole.');
+          }
+        } catch (err) {
+          alert('Chyba při čtení JSON souboru.');
+        }
+      };
+      reader.readAsText(file);
     }
 
     function addGamePlayerRow() {
@@ -274,32 +312,33 @@
     function renderModalPlayersRows() {
       const container = document.getElementById('modal-game-players-container');
       const registeredPlayers = users.filter(u => u.role === 'PLAYER');
+      const availableChars = tempGameCharacters.length > 0 ? tempGameCharacters : characters;
 
       container.innerHTML = tempGamePlayers.map((p, idx) => `
         <div class="grid grid-cols-1 md:grid-cols-5 gap-2 bg-black/50 p-3 rounded-lg border border-gray-800 items-center mb-2 text-xs">
           <div>
             <label class="block text-gray-400 text-[10px] mb-0.5">Student</label>
-            <select onchange="tempGamePlayers[${idx}].userId = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white">
+            <select onchange="tempGamePlayers[${idx}].userId = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white" required>
               <option value="">-- Vybrat studenta --</option>
               ${registeredPlayers.map(u => `<option value="${u.id}" ${p.userId == u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
             </select>
           </div>
           <div>
             <label class="block text-gray-400 text-[10px] mb-0.5">Postava</label>
-            <select onchange="tempGamePlayers[${idx}].charName = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white">
+            <select onchange="tempGamePlayers[${idx}].charName = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white" required>
               <option value="">-- Vybrat postavu --</option>
-              ${characters.map(c => `<option value="${c.name}" ${p.charName === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
+              ${availableChars.map(c => `<option value="${c.name}" ${p.charName === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
             </select>
           </div>
           <div>
-            <label class="block text-gray-400 text-[10px] mb-0.5">Příslušnost na začátku</label>
+            <label class="block text-gray-400 text-[10px] mb-0.5">Začátek (Příslušnost)</label>
             <select onchange="tempGamePlayers[${idx}].startAlignment = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white">
               <option value="GOOD" ${p.startAlignment === 'GOOD' ? 'selected' : ''}>Dobro</option>
               <option value="EVIL" ${p.startAlignment === 'EVIL' ? 'selected' : ''}>Zlo</option>
             </select>
           </div>
           <div>
-            <label class="block text-gray-400 text-[10px] mb-0.5">Příslušnost na konci</label>
+            <label class="block text-gray-400 text-[10px] mb-0.5">Konec (Příslušnost)</label>
             <select onchange="tempGamePlayers[${idx}].endAlignment = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white">
               <option value="GOOD" ${p.endAlignment === 'GOOD' ? 'selected' : ''}>Dobro</option>
               <option value="EVIL" ${p.endAlignment === 'EVIL' ? 'selected' : ''}>Zlo</option>
@@ -314,8 +353,9 @@
 
     async function saveGame(e) {
       e.preventDefault();
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
       const title = document.getElementById('game-title-input').value.trim();
-      const winningTeam = document.getElementById('game-winner-input').value; // 'GOOD' nebo 'EVIL'
+      const winningTeam = document.getElementById('game-winner-input').value;
       const date = new Date().toLocaleDateString('cs-CZ');
 
       const evaluatedPlayers = tempGamePlayers.map(p => {
@@ -336,6 +376,15 @@
       renderGames();
     }
 
+    async function deleteGame(gameId) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      if (confirm('Opravdu chcete smazat tuto hru z historie?')) {
+        games = games.filter(g => g.id !== gameId);
+        await saveState();
+        renderGames();
+      }
+    }
+
     function renderGames() {
       const container = document.getElementById('games-list');
       const isAdmin = currentUser && currentUser.role === 'ADMIN';
@@ -347,8 +396,9 @@
       }
 
       container.innerHTML = games.map(g => `
-        <div class="bg-gray-900 border ${g.winningTeam === 'GOOD' ? 'border-blue-600/50' : 'border-red-600/50'} p-5 rounded-xl mb-4 shadow-lg">
-          <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-3 mb-3 gap-2">
+        <div class="bg-gray-900 border ${g.winningTeam === 'GOOD' ? 'border-blue-600/50' : 'border-red-600/50'} p-5 rounded-xl mb-4 shadow-lg relative">
+          ${isAdmin ? `<button onclick="deleteGame(${g.id})" class="absolute top-4 right-4 text-red-400 hover:text-red-300 text-sm" title="Smazat hru"><i class="fa-solid fa-trash"></i></button>` : ''}
+          <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-3 mb-3 gap-2 pr-8">
             <div>
               <h3 class="text-lg font-bold text-white magic-font">${g.title}</h3>
               <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${g.winningTeam === 'GOOD' ? 'bg-blue-950 text-blue-400 border border-blue-700' : 'bg-red-950 text-red-400 border border-red-700'}">
@@ -376,6 +426,7 @@
 
     // --- BODOVÁNÍ KOLEJÍ ---
     async function updateHousePoints(house, delta) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
       if (!housePoints[house]) housePoints[house] = 0;
       housePoints[house] += delta;
       await saveState();
@@ -421,6 +472,7 @@
     // --- STUDENTI ---
     async function addStudent(e) {
       e.preventDefault();
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
       const name = document.getElementById('student-name').value.trim();
       const username = document.getElementById('student-username').value.trim();
       const pass = document.getElementById('student-pass').value.trim();
@@ -435,6 +487,15 @@
       await saveState();
       document.getElementById('add-student-form').reset();
       renderPlayers();
+    }
+
+    async function deleteStudent(userId) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      if (confirm('Opravdu chcete smazat tohoto studenta?')) {
+        users = users.filter(u => u.id !== userId);
+        await saveState();
+        renderPlayers();
+      }
     }
 
     function renderPlayers() {
@@ -457,6 +518,7 @@
                 <th class="p-3">Jméno studenta</th>
                 <th class="p-3">Uživatelské jméno</th>
                 <th class="p-3">Kolej</th>
+                ${isAdmin ? '<th class="p-3 text-right">Akce</th>' : ''}
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-800">
@@ -465,6 +527,7 @@
                   <td class="p-3 font-semibold text-white">${p.name}</td>
                   <td class="p-3 text-gray-400">${p.username}</td>
                   <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs font-bold bg-gray-800 text-yellow-400">${p.house}</span></td>
+                  ${isAdmin ? `<td class="p-3 text-right"><button onclick="deleteStudent(${p.id})" class="text-red-400 hover:text-red-300 text-xs"><i class="fa-solid fa-trash"></i> Smazat</button></td>` : ''}
                 </tr>
               `).join('')}
             </tbody>
@@ -475,6 +538,7 @@
 
     // --- SKRIPT POSTAV ---
     async function uploadCharactersScript(e) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
@@ -675,7 +739,7 @@
         <button onclick="closeGameModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
       </div>
       <form id="add-game-form" onsubmit="saveGame(event)" class="space-y-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label class="block text-xs text-gray-400 mb-1">Název hry / scénáře</label>
             <input type="text" id="game-title-input" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
@@ -686,6 +750,10 @@
               <option value="GOOD">Dobro (Měšťané)</option>
               <option value="EVIL">Zlo (Démon)</option>
             </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Nahrát JSON scénář (volitelné)</label>
+            <input type="file" accept=".json" onchange="handleGameScriptUpload(event)" class="w-full text-xs text-gray-400 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-yellow-500 file:text-black hover:file:bg-yellow-400 cursor-pointer">
           </div>
         </div>
 
