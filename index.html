@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Harry Potter x Blood on the Clocktower</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Inter:wght@300;400;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0b0c10; color: #c5c6c7; }
+    h1, h2, h3, .magic-font { font-family: 'Cinzel', serif; }
+    .gold-border { border-color: #d4af37; }
+    .gold-text { color: #d4af37; }
+    .gold-bg { background-color: #d4af37; }
+  </style>
+  <script>
+    const STORAGE_USERS = 'hp_botc_users';
+    const STORAGE_GAMES = 'hp_botc_games';
+    const STORAGE_ITEMS = 'hp_botc_items';
+    const STORAGE_POLLS = 'hp_botc_polls';
+    const STORAGE_CHARS = 'hp_botc_chars';
+    const STORAGE_HOUSE_POINTS = 'hp_botc_house_points';
+
+    const defaultUsers = [
+      { id: 1, username: 'admin', password: 'bradavice', name: 'Vypravěč (GM)', role: 'ADMIN', house: 'None', points: 0 },
+      { id: 2, username: 'hrac', password: 'bradavice', name: 'Student Bradavic', role: 'PLAYER', house: 'Gryffindor', points: 25 }
+    ];
+
+    const defaultHousePoints = { Gryffindor: 150, Slytherin: 120, Ravenclaw: 140, Hufflepuff: 110 };
+
+    let currentUser = null;
+    let users = JSON.parse(localStorage.getItem(STORAGE_USERS)) || defaultUsers;
+    let characters = JSON.parse(localStorage.getItem(STORAGE_CHARS)) || [];
+    let games = JSON.parse(localStorage.getItem(STORAGE_GAMES)) || [];
+    let items = JSON.parse(localStorage.getItem(STORAGE_ITEMS)) || [];
+    let polls = JSON.parse(localStorage.getItem(STORAGE_POLLS)) || [];
+    let housePoints = JSON.parse(localStorage.getItem(STORAGE_HOUSE_POINTS)) || defaultHousePoints;
+    let activeTab = 'characters';
+
+    function saveState() {
+      localStorage.setItem(STORAGE_USERS, JSON.stringify(users));
+      localStorage.setItem(STORAGE_CHARS, JSON.stringify(characters));
+      localStorage.setItem(STORAGE_GAMES, JSON.stringify(games));
+      localStorage.setItem(STORAGE_ITEMS, JSON.stringify(items));
+      localStorage.setItem(STORAGE_POLLS, JSON.stringify(polls));
+      localStorage.setItem(STORAGE_HOUSE_POINTS, JSON.stringify(housePoints));
+    }
+
+    function fillLogin(u, p) {
+      document.getElementById('login-username').value = u;
+      document.getElementById('login-password').value = p;
+    }
+
+    function handleLogin(e) {
+      if (e) e.preventDefault();
+      const u = document.getElementById('login-username').value.trim();
+      const p = document.getElementById('login-password').value.trim();
+      const found = users.find(user => user.username.toLowerCase() === u.toLowerCase() && user.password === p);
+      if (found) {
+        currentUser = found;
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('app-screen').classList.remove('hidden');
+        document.getElementById('user-display-name').textContent = currentUser.name;
+        document.getElementById('user-display-role').textContent = currentUser.role === 'ADMIN' ? 'Vypravěč (GM)' : 'Hráč';
+        if (currentUser.role === 'ADMIN') {
+          document.getElementById('admin-tab-btn').classList.remove('hidden');
+        } else {
+          document.getElementById('admin-tab-btn').classList.add('hidden');
+        }
+        renderCurrentTab();
+      } else {
+        alert('Neplatné uživatelské jméno nebo heslo!');
+      }
+    }
+
+    function logout() {
+      currentUser = null;
+      document.getElementById('app-screen').classList.add('hidden');
+      document.getElementById('login-screen').classList.remove('hidden');
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('border-yellow-500', 'text-yellow-400');
+        btn.classList.add('border-transparent', 'text-gray-400');
+      });
+      const activeBtn = document.getElementById(`tab-btn-${tab}`);
+      if (activeBtn) {
+        activeBtn.classList.remove('border-transparent', 'text-gray-400');
+        activeBtn.classList.add('border-yellow-500', 'text-yellow-400');
+      }
+      renderCurrentTab();
+    }
+
+    function renderCurrentTab() {
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+      const activeContent = document.getElementById(`tab-content-${activeTab}`);
+      if (activeContent) activeContent.classList.remove('hidden');
+
+      if (activeTab === 'characters') renderCharacters();
+      if (activeTab === 'games') renderGames();
+      if (activeTab === 'players') renderPlayers();
+      if (activeTab === 'leaderboard') renderLeaderboard();
+      if (activeTab === 'admin') renderAdminUsers();
+    }
+
+    function uploadCharactersScript(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const json = JSON.parse(evt.target.result);
+          if (Array.isArray(json)) {
+            characters = json.filter(item => item && item.name).map(item => ({
+              id: item.id || Math.random().toString(36).substring(7),
+              name: item.name,
+              team: item.team || 'townsfolk',
+              ability: item.ability || '',
+              image: Array.isArray(item.image) ? item.image[0] : (item.image || ''),
+              onScript: true,
+              hiddenForPlayers: false
+            }));
+            saveState();
+            renderCharacters();
+            alert(`Úspěšně nahráno ${characters.length} postav!`);
+          } else {
+            alert('Soubor JSON nemá správný formát (očekává se pole postav).');
+          }
+        } catch (err) {
+          alert('Chyba při parsování JSON souboru.');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function toggleCharScript(id) {
+      const char = characters.find(c => c.id === id);
+      if (char) {
+        char.onScript = !char.onScript;
+        saveState();
+        renderCharacters();
+      }
+    }
+
+    function toggleCharHidden(id) {
+      const char = characters.find(c => c.id === id);
+      if (char) {
+        char.hiddenForPlayers = !char.hiddenForPlayers;
+        saveState();
+        renderCharacters();
+      }
+    }
+
+    function renderCharacters() {
+      const container = document.getElementById('characters-container');
+      const isAdmin = currentUser && currentUser.role === 'ADMIN';
+      document.getElementById('char-upload-admin-area').className = isAdmin ? 'mb-6 p-4 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
+
+      let visible = characters;
+      if (!isAdmin) {
+        visible = characters.filter(c => !c.hiddenForPlayers && c.onScript);
+      }
+
+      if (visible.length === 0) {
+        container.innerHTML = `<div class="col-span-full text-center text-gray-500 py-12">Žádné postavy nebyly nahrány nebo nejsou viditelné.</div>`;
+        return;
+      }
+
+      const teamColors = {
+        townsfolk: 'border-blue-700 bg-blue-950/20 text-blue-400',
+        outsider: 'border-cyan-700 bg-cyan-950/20 text-cyan-400',
+        minion: 'border-red-700 bg-red-950/20 text-red-400',
+        demon: 'border-purple-700 bg-purple-950/20 text-purple-400',
+        traveller: 'border-pink-700 bg-pink-950/20 text-pink-400',
+        fabled: 'border-yellow-700 bg-yellow-950/20 text-yellow-400'
+      };
+
+      container.innerHTML = visible.map(c => {
+        const teamBadge = teamColors[c.team] || 'border-gray-700 bg-gray-950/20 text-gray-400';
+        return `
+          <div class="border ${teamBadge} rounded-xl p-5 shadow-lg relative flex flex-col justify-between ${!c.onScript ? 'opacity-40 grayscale' : ''}">
+            <div>
+              <div class="flex items-center space-x-4 mb-3">
+                ${c.image ? `<img src="${c.image}" class="w-14 h-14 object-contain rounded-full border border-yellow-500/30 bg-black/40 p-1">` : `<div class="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center text-yellow-500 magic-font text-xl font-bold">${c.name.charAt(0)}</div>`}
+                <div>
+                  <h3 class="font-bold text-lg text-white magic-font">${c.name}</h3>
+                  <span class="text-xs font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wider ${teamBadge}">${c.team}</span>
+                </div>
+              </div>
+              <p class="text-sm text-gray-300 mb-4 leading-relaxed">${c.ability || 'Bez popisu schopnosti.'}</p>
+            </div>
+            ${isAdmin ? `
+              <div class="border-t border-gray-800 pt-3 mt-2 flex flex-wrap gap-2 text-xs">
+                <button onclick="toggleCharScript('${c.id}')" class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-white transition">
+                  ${c.onScript ? '✓ Na Scriptu' : '✕ Mimo Script'}
+                </button>
+                <button onclick="toggle
