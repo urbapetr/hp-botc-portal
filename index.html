@@ -21,7 +21,7 @@
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const defaultUsers = [
-      { id: 1, username: 'MrAgnl', password: 'CoTeToZajima69.', name: 'Vypravěč (GM)', role: 'ADMIN', house: 'None', points: 0 },
+      { id: 1, username: 'MrAgnl', password: 'CoTeToZajima69.', name: 'Vypravěč (GM)', role: 'ADMIN', house: 'Gryffindor', points: 0 },
       { id: 2, username: 'hrac', password: 'bradavice', name: 'Student Bradavic', role: 'PLAYER', house: 'Gryffindor', points: 0 },
       { id: 3, username: 'divak', password: 'bradavice', name: 'Divák zvenčí', role: 'SPECTATOR', house: 'None', points: 0 }
     ];
@@ -58,7 +58,6 @@
         if (data && data.payload) {
           const p = data.payload;
           users = p.users && p.users.length > 0 ? p.users : defaultUsers;
-          // Zajistíme, aby všichni uživatelé měli definované pole points
           users.forEach(u => { if (u.points === undefined) u.points = 0; });
           characters = p.characters || [];
           games = p.games || [];
@@ -109,7 +108,7 @@
         document.getElementById('user-display-name').textContent = currentUser.name;
         
         let roleName = 'Hráč';
-        if (currentUser.role === 'ADMIN') roleName = 'Vypravěč (GM / Učitel)';
+        if (currentUser.role === 'ADMIN') roleName = 'Učitel (Admin / GM)';
         if (currentUser.role === 'SPECTATOR') roleName = 'Divák';
         document.getElementById('user-display-role').textContent = roleName;
 
@@ -624,7 +623,7 @@
         password: pass, 
         name, 
         role, 
-        house: role === 'ADMIN' ? 'None' : house, 
+        house, 
         points: 0 
       });
       await saveState();
@@ -657,7 +656,6 @@
       const isAdmin = currentUser && currentUser.role === 'ADMIN';
       document.getElementById('admin-add-student-area').className = isAdmin ? 'mb-8 p-5 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
 
-      // Zobrazujeme hráče (STUDENTY) i učitele (ADMINY) v přehledu
       const displayUsers = users.filter(u => u.role === 'PLAYER' || u.role === 'ADMIN');
 
       if (displayUsers.length === 0) {
@@ -673,7 +671,6 @@
             <thead class="bg-gray-900 text-yellow-500 magic-font uppercase text-xs">
               <tr>
                 <th class="p-3">Jméno</th>
-                <th class="p-3">Uživatelské jméno</th>
                 <th class="p-3">Role</th>
                 <th class="p-3">Kolej</th>
                 <th class="p-3">Body pro kolej</th>
@@ -684,16 +681,17 @@
               ${displayUsers.map(p => `
                 <tr class="hover:bg-gray-900/50">
                   <td class="p-3 font-semibold text-white">${p.name}</td>
-                  <td class="p-3 text-gray-400">${p.username}</td>
                   <td class="p-3"><span class="px-2.5 py-0.5 rounded text-xs font-bold ${p.role === 'ADMIN' ? 'bg-yellow-950 text-yellow-400 border border-yellow-700' : 'bg-gray-800 text-blue-400'}">${p.role === 'ADMIN' ? 'Učitel (Admin)' : 'Student'}</span></td>
                   <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs font-bold bg-gray-800 text-yellow-400">${houseDisplayMap[p.house] || p.house}</span></td>
-                  <td class="p-3 font-extrabold text-white">${p.points || 0} b</td>
+                  <td class="p-3 font-extrabold text-white">${p.role === 'PLAYER' ? `${p.points || 0} b` : '<span class="text-gray-500 font-normal">-</span>'}</td>
                   ${isAdmin ? `
                     <td class="p-3 text-right flex items-center justify-end gap-2">
-                      <div class="flex items-center gap-1 bg-black/60 p-1 rounded border border-gray-800 text-xs">
-                        <button onclick="updateStudentPoints(${p.id}, 5)" class="px-2 py-0.5 bg-gray-800 hover:bg-green-900 text-green-400 rounded font-bold" title="Přidat 5 bodů">+5</button>
-                        <button onclick="updateStudentPoints(${p.id}, -5)" class="px-2 py-0.5 bg-gray-800 hover:bg-red-900 text-red-400 rounded font-bold" title="Odebrat 5 bodů">-5</button>
-                      </div>
+                      ${p.role === 'PLAYER' ? `
+                        <div class="flex items-center gap-1 bg-black/60 p-1 rounded border border-gray-800 text-xs">
+                          <button onclick="updateStudentPoints(${p.id}, 5)" class="px-2 py-0.5 bg-gray-800 hover:bg-green-900 text-green-400 rounded font-bold" title="Přidat 5 bodů">+5</button>
+                          <button onclick="updateStudentPoints(${p.id}, -5)" class="px-2 py-0.5 bg-gray-800 hover:bg-red-900 text-red-400 rounded font-bold" title="Odebrat 5 bodů">-5</button>
+                        </div>
+                      ` : ''}
                       <button onclick="deleteStudent(${p.id})" class="text-red-400 hover:text-red-300 text-xs p-1" title="Smazat uživatele"><i class="fa-solid fa-trash"></i></button>
                     </td>
                   ` : ''}
