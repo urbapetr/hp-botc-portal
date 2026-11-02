@@ -33,7 +33,6 @@
     let users = defaultUsers;
     let characters = [];
     let games = [];
-    let items = [];
     let polls = [];
     let housePoints = defaultHousePoints;
     let activeTab = 'characters';
@@ -57,7 +56,6 @@
           users = p.users || defaultUsers;
           characters = p.characters || [];
           games = p.games || [];
-          items = p.items || [];
           polls = p.polls || [];
           housePoints = p.housePoints || defaultHousePoints;
         }
@@ -72,7 +70,6 @@
         users,
         characters,
         games,
-        items,
         polls,
         housePoints
       };
@@ -92,7 +89,7 @@
       }
     }
 
-    // Inicializace aplikace po startu
+    // Inicializace po načtení stránek
     window.addEventListener('DOMContentLoaded', async () => {
       await loadStateFromCloud();
       renderCurrentTab();
@@ -154,9 +151,11 @@
       if (activeTab === 'games') renderGames();
       if (activeTab === 'players') renderPlayers();
       if (activeTab === 'leaderboard') renderLeaderboard();
+      if (activeTab === 'polls') renderPolls();
       if (activeTab === 'admin') renderAdminUsers();
     }
 
+    // --- LOGIKA SKRIPTŮ & POSTAV ---
     async function uploadCharactersScript(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -178,10 +177,10 @@
             renderCharacters();
             alert(`Úspěšně nahráno ${characters.length} postav!`);
           } else {
-            alert('Soubor JSON nemá správný formát (očekává se pole postav).');
+            alert('Soubor JSON nemá správný formát.');
           }
         } catch (err) {
-          alert('Chyba při parsování JSON souboru.');
+          alert('Chyba při parsování JSON.');
         }
       };
       reader.readAsText(file);
@@ -191,15 +190,6 @@
       const char = characters.find(c => c.id === id);
       if (char) {
         char.onScript = !char.onScript;
-        await saveState();
-        renderCharacters();
-      }
-    }
-
-    async function toggleCharHidden(id) {
-      const char = characters.find(c => c.id === id);
-      if (char) {
-        char.hiddenForPlayers = !char.hiddenForPlayers;
         await saveState();
         renderCharacters();
       }
@@ -244,7 +234,7 @@
                   <span class="text-xs font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wider ${teamBadge}">${c.team}</span>
                 </div>
               </div>
-              <p class="text-sm text-gray-300 mb-4 leading-relaxed">${c.ability || 'Bez popisu schopnosti.'}</p>
+              <p class="text-sm text-gray-300 mb-4 leading-relaxed">${c.ability || 'Bez popisu.'}</p>
             </div>
             ${isAdmin ? `
               <div class="border-t border-gray-800 pt-3 mt-2 flex flex-wrap gap-2 text-xs">
@@ -258,10 +248,220 @@
       }).join('');
     }
 
-    function renderGames() {}
-    function renderPlayers() {}
-    function renderLeaderboard() {}
-    function renderAdminUsers() {}
+    // --- LOGIKA HISTORIE HER ---
+    async function addGame(e) {
+      e.preventDefault();
+      const title = document.getElementById('game-title').value.trim();
+      const winner = document.getElementById('game-winner').value;
+      const notes = document.getElementById('game-notes').value.trim();
+      const date = new Date().toLocaleDateString('cs-CZ');
+
+      games.unshift({ id: Date.now(), title, winner, notes, date });
+      await saveState();
+      document.getElementById('add-game-form').reset();
+      renderGames();
+    }
+
+    function renderGames() {
+      const container = document.getElementById('games-list');
+      const isAdmin = currentUser && currentUser.role === 'ADMIN';
+      document.getElementById('admin-add-game-area').className = isAdmin ? 'mb-8 p-5 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
+
+      if (games.length === 0) {
+        container.innerHTML = `<div class="text-center text-gray-500 py-8">Zatím nebyly odehrány žádné hry.</div>`;
+        return;
+      }
+
+      container.innerHTML = games.map(g => `
+        <div class="bg-gray-900 border ${g.winner === 'GOOD' ? 'border-blue-600/50' : 'border-red-600/50'} p-5 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <div class="flex items-center gap-3 mb-1">
+              <h3 class="text-lg font-bold text-white magic-font">${g.title}</h3>
+              <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${g.winner === 'GOOD' ? 'bg-blue-950 text-blue-400 border border-blue-700' : 'bg-red-950 text-red-400 border border-red-700'}">
+                Vítěz: ${g.winner === 'GOOD' ? 'Dobro (Měšťané)' : 'Zlo (Démon)'}
+              </span>
+            </div>
+            <p class="text-sm text-gray-400">${g.notes || 'Bez poznámky.'}</p>
+          </div>
+          <div class="text-xs text-gray-500 whitespace-nowrap"><i class="fa-regular fa-calendar mr-1"></i> ${g.date}</div>
+        </div>
+      `).join('');
+    }
+
+    // --- LOGIKA BODOVÁNÍ KOLEJÍ ---
+    async function updateHousePoints(house, delta) {
+      if (!housePoints[house]) housePoints[house] = 0;
+      housePoints[house] += delta;
+      await saveState();
+      renderLeaderboard();
+    }
+
+    function renderLeaderboard() {
+      const container = document.getElementById('house-points-container');
+      const isAdmin = currentUser && currentUser.role === 'ADMIN';
+
+      const housesMeta = {
+        Gryffindor: { name: 'Nebelvír', color: 'border-red-700 bg-red-950/30 text-red-400', icon: 'fa-shield-halved' },
+        Slytherin: { name: 'Zmijozel', color: 'border-green-700 bg-green-950/30 text-green-400', icon: 'fa-staff-snake' },
+        Ravenclaw: { name: 'Havraspár', color: 'border-blue-700 bg-blue-950/30 text-blue-400', icon: 'fa-feather' },
+        Hufflepuff: { name: 'Mrzipus', color: 'border-yellow-700 bg-yellow-950/30 text-yellow-400', icon: 'fa-sun' }
+      };
+
+      container.innerHTML = Object.keys(housesMeta).map(key => {
+        const meta = housesMeta[key];
+        const points = housePoints[key] || 0;
+        return `
+          <div class="border ${meta.color} rounded-2xl p-6 flex flex-col justify-between shadow-xl">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-2xl font-bold magic-font">${meta.name}</h3>
+                <i class="fa-solid ${meta.icon} text-2xl"></i>
+              </div>
+              <div class="text-4xl font-extrabold text-white mb-4 magic-font">${points} <span class="text-sm text-gray-400 font-normal">bodů</span></div>
+            </div>
+            ${isAdmin ? `
+              <div class="border-t border-gray-800 pt-4 grid grid-cols-4 gap-2 text-xs font-bold">
+                <button onclick="updateHousePoints('${key}', 10)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+10</button>
+                <button onclick="updateHousePoints('${key}', 50)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+50</button>
+                <button onclick="updateHousePoints('${key}', -10)" class="bg-gray-800 hover:bg-red-900 text-red-400 py-2 rounded">-10</button>
+                <button onclick="updateHousePoints('${key}', -50)" class="bg-gray-800 hover:bg-red-900 text-red-400 py-2 rounded">-50</button>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- LOGIKA STUDENTŮ / HRÁČŮ ---
+    async function addStudent(e) {
+      e.preventDefault();
+      const name = document.getElementById('student-name').value.trim();
+      const username = document.getElementById('student-username').value.trim();
+      const pass = document.getElementById('student-pass').value.trim();
+      const house = document.getElementById('student-house').value;
+
+      if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+        alert('Uživatel s tímto jménem již existuje!');
+        return;
+      }
+
+      users.push({ id: Date.now(), username, password: pass, name, role: 'PLAYER', house, points: 0 });
+      await saveState();
+      document.getElementById('add-student-form').reset();
+      renderPlayers();
+    }
+
+    function renderPlayers() {
+      const container = document.getElementById('players-list');
+      const isAdmin = currentUser && currentUser.role === 'ADMIN';
+      document.getElementById('admin-add-student-area').className = isAdmin ? 'mb-8 p-5 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
+
+      const players = users.filter(u => u.role === 'PLAYER');
+
+      if (players.length === 0) {
+        container.innerHTML = `<div class="text-center text-gray-500 py-8">Zatím nejsou zapsáni žádní studenti.</div>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm text-gray-300">
+            <thead class="bg-gray-900 text-yellow-500 magic-font uppercase text-xs">
+              <tr>
+                <th class="p-3">Jméno studenta</th>
+                <th class="p-3">Uživatelské jméno</th>
+                <th class="p-3">Kolej</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800">
+              ${players.map(p => `
+                <tr class="hover:bg-gray-900/50">
+                  <td class="p-3 font-semibold text-white">${p.name}</td>
+                  <td class="p-3 text-gray-400">${p.username}</td>
+                  <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs font-bold bg-gray-800 text-yellow-400">${p.house}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    // --- LOGIKA ANKET & HLASOVÁNÍ ---
+    async function createPoll(e) {
+      e.preventDefault();
+      const title = document.getElementById('poll-title').value.trim();
+      const opt1 = document.getElementById('poll-opt1').value.trim();
+      const opt2 = document.getElementById('poll-opt2').value.trim();
+
+      polls.unshift({
+        id: Date.now(),
+        title,
+        options: [
+          { text: opt1, votes: [] },
+          { text: opt2, votes: [] }
+        ]
+      });
+
+      await saveState();
+      document.getElementById('add-poll-form').reset();
+      renderPolls();
+    }
+
+    async function votePoll(pollId, optionIndex) {
+      if (!currentUser) return;
+      const poll = polls.find(p => p.id === pollId);
+      if (!poll) return;
+
+      // Odstranění předchozího hlasu uživatele
+      poll.options.forEach(opt => {
+        opt.votes = opt.votes.filter(uId => uId !== currentUser.id);
+      });
+
+      // Přidání nového hlasu
+      poll.options[optionIndex].votes.push(currentUser.id);
+      await saveState();
+      renderPolls();
+    }
+
+    function renderPolls() {
+      const container = document.getElementById('polls-list');
+      const isAdmin = currentUser && currentUser.role === 'ADMIN';
+      document.getElementById('admin-add-poll-area').className = isAdmin ? 'mb-8 p-5 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
+
+      if (polls.length === 0) {
+        container.innerHTML = `<div class="text-center text-gray-500 py-8">Zatím nebyly vytvořeny žádné ankety.</div>`;
+        return;
+      }
+
+      container.innerHTML = polls.map(p => `
+        <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl mb-4">
+          <h3 class="text-lg font-bold text-white magic-font mb-4">${p.title}</h3>
+          <div class="space-y-3">
+            ${p.options.map((opt, idx) => {
+              const hasVoted = opt.votes.includes(currentUser ? currentUser.id : null);
+              return `
+                <button onclick="votePoll(${p.id}, ${idx})" class="w-full text-left p-3 rounded-lg border ${hasVoted ? 'border-yellow-500 bg-yellow-500/10' : 'border-gray-800 bg-black/40'} hover:border-yellow-600 transition flex justify-between items-center">
+                  <span class="text-sm font-semibold ${hasVoted ? 'text-yellow-400' : 'text-gray-300'}">${opt.text}</span>
+                  <span class="text-xs bg-gray-800 px-2.5 py-1 rounded-full text-gray-400 font-bold">${opt.votes.length} hlasů</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderAdminUsers() {
+      const container = document.getElementById('admin-users-list');
+      container.innerHTML = `
+        <div class="bg-gray-900 p-5 border border-yellow-600/40 rounded-xl">
+          <h3 class="text-lg font-bold text-yellow-400 magic-font mb-3">Správa databáze</h3>
+          <p class="text-sm text-gray-400 mb-4">Data jsou automaticky synchronizována s vaší cloudovou databází v Supabase.</p>
+          <button onclick="saveState()" class="gold-bg text-black font-bold px-4 py-2 rounded hover:opacity-90 transition text-sm"><i class="fa-solid fa-rotate mr-2"></i> Ručně uložit stav do Supabase</button>
+        </div>
+      `;
+    }
   </script>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -305,6 +505,7 @@
       <button onclick="switchTab('games')" id="tab-btn-games" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Historie her</button>
       <button onclick="switchTab('players')" id="tab-btn-players" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Studenti</button>
       <button onclick="switchTab('leaderboard')" id="tab-btn-leaderboard" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Bodování kolejí</button>
+      <button onclick="switchTab('polls')" id="tab-btn-polls" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Hlasování & Ankety</button>
       <button onclick="switchTab('admin')" id="tab-btn-admin" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap hidden">Admin Správa</button>
     </nav>
 
@@ -312,7 +513,7 @@
       <!-- TAB: CHARACTERS -->
       <div id="tab-content-characters" class="tab-content">
         <div id="char-upload-admin-area" class="hidden">
-          <label class="block text-sm font-semibold text-yellow-400 mb-2">Nahnat JSON Script postav:</label>
+          <label class="block text-sm font-semibold text-yellow-400 mb-2">Nahranat JSON Script postav:</label>
           <input type="file" accept=".json" onchange="uploadCharactersScript(event)" class="text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-yellow-500 file:text-black hover:file:bg-yellow-400 cursor-pointer">
         </div>
         <div id="characters-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
@@ -320,22 +521,68 @@
 
       <!-- TAB: GAMES -->
       <div id="tab-content-games" class="tab-content hidden">
-        <h2 class="text-xl font-bold mb-4 magic-font">Historie her</h2>
+        <div id="admin-add-game-area" class="hidden">
+          <h3 class="text-lg font-bold text-yellow-400 magic-font mb-3">Zapsat novou odehranou hru</h3>
+          <form id="add-game-form" onsubmit="addGame(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <input type="text" id="game-title" placeholder="Název hry / scénáře" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <select id="game-winner" class="bg-black border border-gray-700 rounded p-2 text-sm text-white">
+              <option value="GOOD">Vítězství: Dobro (Měšťané)</option>
+              <option value="EVIL">Vítězství: Zlo (Démon)</option>
+            </select>
+            <input type="text" id="game-notes" placeholder="Poznámka (volitelné)" class="bg-black border border-gray-700 rounded p-2 text-sm text-white">
+            <button type="submit" class="gold-bg text-black font-bold py-2 rounded md:col-span-3 hover:opacity-90 transition">Zapsat hru</button>
+          </form>
+        </div>
+        <h2 class="text-xl font-bold mb-4 magic-font">Historie odehraných her</h2>
+        <div id="games-list" class="space-y-4"></div>
       </div>
 
       <!-- TAB: PLAYERS -->
       <div id="tab-content-players" class="tab-content hidden">
+        <div id="admin-add-student-area" class="hidden">
+          <h3 class="text-lg font-bold text-yellow-400 magic-font mb-3">Přidat nového studenta / hráče</h3>
+          <form id="add-student-form" onsubmit="addStudent(event)" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <input type="text" id="student-name" placeholder="Celé jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <input type="text" id="student-username" placeholder="Přihlašovací jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <input type="text" id="student-pass" placeholder="Heslo" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <select id="student-house" class="bg-black border border-gray-700 rounded p-2 text-sm text-white">
+              <option value="Gryffindor">Nebelvír</option>
+              <option value="Slytherin">Zmijozel</option>
+              <option value="Ravenclaw">Havraspár</option>
+              <option value="Hufflepuff">Mrzipus</option>
+            </select>
+            <button type="submit" class="gold-bg text-black font-bold py-2 rounded lg:col-span-4 hover:opacity-90 transition">Registrovat studenta</button>
+          </form>
+        </div>
         <h2 class="text-xl font-bold mb-4 magic-font">Seznam studentů</h2>
+        <div id="players-list"></div>
       </div>
 
       <!-- TAB: LEADERBOARD -->
       <div id="tab-content-leaderboard" class="tab-content hidden">
-        <h2 class="text-xl font-bold mb-4 magic-font">Bodování kolejí</h2>
+        <h2 class="text-xl font-bold mb-6 magic-font">Bodování kolejí</h2>
+        <div id="house-points-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div>
+      </div>
+
+      <!-- TAB: POLLS -->
+      <div id="tab-content-polls" class="tab-content hidden">
+        <div id="admin-add-poll-area" class="hidden">
+          <h3 class="text-lg font-bold text-yellow-400 magic-font mb-3">Vytvořit novou anketu</h3>
+          <form id="add-poll-form" onsubmit="createPoll(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <input type="text" id="poll-title" placeholder="Otázka ankety" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <input type="text" id="poll-opt1" placeholder="Možnost 1" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <input type="text" id="poll-opt2" placeholder="Možnost 2" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <button type="submit" class="gold-bg text-black font-bold py-2 rounded md:col-span-3 hover:opacity-90 transition">Zveřejnit anketu</button>
+          </form>
+        </div>
+        <h2 class="text-xl font-bold mb-4 magic-font">Aktivní hlasování</h2>
+        <div id="polls-list"></div>
       </div>
 
       <!-- TAB: ADMIN -->
       <div id="tab-content-admin" class="tab-content hidden">
         <h2 class="text-xl font-bold mb-4 magic-font">Administrace</h2>
+        <div id="admin-users-list"></div>
       </div>
     </main>
   </div>
