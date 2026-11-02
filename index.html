@@ -1,3 +1,4 @@
+<a_file_content path="index.html">
 <!DOCTYPE html>
 <html lang="cs">
 <head>
@@ -36,7 +37,11 @@
     let activeTab = 'characters';
 
     let tempGamePlayers = [];
-    let tempGameCharacters = []; // Dočasné postavy pro právě vytvářenou hru
+    let tempGameCharacters = [];
+
+    // Proměnná pro sledování právě upravované hry a ankety
+    let editingGameId = null;
+    let editingPollId = null;
 
     async function loadStateFromCloud() {
       try {
@@ -141,20 +146,42 @@
     }
 
     // --- ANKETY ---
-    function openPollModal() {
+    function openPollModal(pollId = null) {
       if (!currentUser || currentUser.role !== 'ADMIN') return;
+      
+      editingPollId = pollId;
+      const modalTitle = document.getElementById('poll-modal-title');
+      const container = document.getElementById('poll-options-container');
+      container.innerHTML = '';
+
+      if (pollId) {
+        modalTitle.textContent = 'Upravit anketu';
+        const poll = polls.find(p => p.id === pollId);
+        if (poll) {
+          document.getElementById('poll-title-input').value = poll.title;
+          document.getElementById('poll-max-votes').value = poll.maxVotes || 1;
+          
+          poll.options.forEach(opt => {
+            addPollOptionInput(opt.text);
+          });
+        }
+      } else {
+        modalTitle.textContent = 'Nová anketa';
+        document.getElementById('add-poll-form').reset();
+        addPollOptionInput();
+        addPollOptionInput();
+      }
+
       document.getElementById('poll-modal').classList.remove('hidden');
-      document.getElementById('poll-options-container').innerHTML = '';
-      addPollOptionInput();
-      addPollOptionInput();
     }
 
     function closePollModal() {
       document.getElementById('poll-modal').classList.add('hidden');
       document.getElementById('add-poll-form').reset();
+      editingPollId = null;
     }
 
-    function addPollOptionInput() {
+    function addPollOptionInput(initialValue = '') {
       const container = document.getElementById('poll-options-container');
       const count = container.children.length;
       if (count >= 10) {
@@ -164,7 +191,7 @@
       const div = document.createElement('div');
       div.className = "flex gap-2 items-center";
       div.innerHTML = `
-        <input type="text" placeholder="Možnost ${count + 1}" class="poll-option-input flex-grow bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+        <input type="text" value="${initialValue}" placeholder="Možnost ${count + 1}" class="poll-option-input flex-grow bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
         ${count >= 2 ? `<button type="button" onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-300 p-2"><i class="fa-solid fa-trash"></i></button>` : ''}
       `;
       container.appendChild(div);
@@ -176,22 +203,56 @@
       const title = document.getElementById('poll-title-input').value.trim();
       const maxVotes = parseInt(document.getElementById('poll-max-votes').value) || 1;
       const optionInputs = document.querySelectorAll('.poll-option-input');
-      const options = [];
-
+      
+      const newOptionsText = [];
       optionInputs.forEach(input => {
         const val = input.value.trim();
-        if (val) options.push({ text: val, votes: [] });
+        if (val) newOptionsText.push(val);
       });
 
-      if (options.length < 2) {
+      if (newOptionsText.length < 2) {
         alert('Anketa musí mít alespoň 2 možnosti!');
         return;
       }
 
-      polls.unshift({ id: Date.now(), title, maxVotes, options });
+      if (editingPollId) {
+        const poll = polls.find(p => p.id === editingPollId);
+        if (poll) {
+          poll.title = title;
+          poll.maxVotes = maxVotes;
+          
+          // Zachovat předchozí hlasy u shodných možností
+          poll.options = newOptionsText.map(text => {
+            const existingOpt = poll.options.find(o => o.text === text);
+            return {
+              text: text,
+              votes: existingOpt ? existingOpt.votes : []
+            };
+          });
+        }
+      } else {
+        polls.unshift({
+          id: Date.now(),
+          title,
+          maxVotes,
+          closed: false,
+          options: newOptionsText.map(t => ({ text: t, votes: [] }))
+        });
+      }
+
       await saveState();
       closePollModal();
       renderPolls();
+    }
+
+    async function togglePollClose(pollId) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      const poll = polls.find(p => p.id === pollId);
+      if (poll) {
+        poll.closed = !poll.closed;
+        await saveState();
+        renderPolls();
+      }
     }
 
     async function deletePoll(pollId) {
@@ -206,7 +267,7 @@
     async function votePoll(pollId, optionIndex) {
       if (!currentUser) return;
       const poll = polls.find(p => p.id === pollId);
-      if (!poll) return;
+      if (!poll || poll.closed) return;
 
       const userVotesCount = poll.options.filter(opt => opt.votes.includes(currentUser.id)).length;
       const hasVotedThis = poll.options[optionIndex].votes.includes(currentUser.id);
@@ -235,40 +296,90 @@
         return;
       }
 
-      container.innerHTML = polls.map(p => `
-        <div class="bg-gray-900 border border-yellow-600/30 p-5 rounded-xl mb-4 shadow-lg relative">
-          ${isAdmin ? `<button onclick="deletePoll(${p.id})" class="absolute top-4 right-4 text-red-400 hover:text-red-300 text-sm" title="Smazat anketu"><i class="fa-solid fa-trash"></i></button>` : ''}
-          <div class="flex justify-between items-start mb-2 pr-8">
-            <h3 class="text-lg font-bold text-white magic-font">${p.title}</h3>
-            <span class="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 px-2.5 py-1 rounded-full font-semibold">Max ${p.maxVotes} hlas/ů</span>
-          </div>
-          <div class="space-y-2 mt-4">
-            ${p.options.map((opt, idx) => {
-              const hasVoted = opt.votes.includes(currentUser ? currentUser.id : null);
-              return `
-                <button onclick="votePoll(${p.id}, ${idx})" class="w-full text-left p-3 rounded-lg border ${hasVoted ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-gray-800 bg-black/40 text-gray-300'} hover:border-yellow-600 transition flex justify-between items-center">
-                  <span class="text-sm font-semibold">${opt.text}</span>
-                  <span class="text-xs bg-gray-800 px-2.5 py-1 rounded-full text-gray-400 font-bold">${opt.votes.length} hlasů</span>
+      container.innerHTML = polls.map(p => {
+        let maxVotesCount = 0;
+        if (p.closed && p.options) {
+          maxVotesCount = Math.max(...p.options.map(o => o.votes ? o.votes.length : 0));
+        }
+
+        return `
+          <div class="bg-gray-900 border ${p.closed ? 'border-red-900/40 bg-gray-950/80' : 'border-yellow-600/30'} p-5 rounded-xl mb-4 shadow-lg relative">
+            ${isAdmin ? `
+              <div class="absolute top-4 right-4 flex gap-2">
+                <button onclick="openPollModal(${p.id})" class="text-yellow-400 hover:text-yellow-300 text-sm p-1" title="Upravit anketu"><i class="fa-solid fa-pen"></i></button>
+                <button onclick="togglePollClose(${p.id})" class="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">
+                  ${p.closed ? '<i class="fa-solid fa-lock-open mr-1"></i> Otevřít' : '<i class="fa-solid fa-lock mr-1"></i> Uzavřít'}
                 </button>
-              `;
-            }).join('')}
+                <button onclick="deletePoll(${p.id})" class="text-red-400 hover:text-red-300 text-sm p-1" title="Smazat anketu"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            ` : ''}
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-2 pr-28 gap-2">
+              <h3 class="text-lg font-bold text-white magic-font flex items-center gap-2">
+                ${p.title}
+                ${p.closed ? '<span class="text-xs bg-red-950 text-red-400 border border-red-700 px-2 py-0.5 rounded uppercase font-sans font-bold">UZAVŘENO</span>' : ''}
+              </h3>
+              <span class="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 px-2.5 py-1 rounded-full font-semibold w-fit">Max ${p.maxVotes} hlas/ů</span>
+            </div>
+            <div class="space-y-2 mt-4">
+              ${p.options.map((opt, idx) => {
+                const hasVoted = opt.votes.includes(currentUser ? currentUser.id : null);
+                const isWinner = p.closed && maxVotesCount > 0 && opt.votes.length === maxVotesCount;
+
+                return `
+                  <button onclick="votePoll(${p.id}, ${idx})" ${p.closed ? 'disabled' : ''} class="w-full text-left p-3 rounded-lg border ${hasVoted ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-gray-800 bg-black/40 text-gray-300'} ${p.closed ? 'cursor-not-allowed opacity-90' : 'hover:border-yellow-600'} transition flex justify-between items-center">
+                    <span class="text-sm font-semibold">${opt.text}</span>
+                    <span class="text-xs px-2.5 py-1 rounded-full font-bold ${isWinner ? 'bg-green-600 text-white font-extrabold shadow-lg shadow-green-900/50' : 'bg-gray-800 text-gray-400'}">
+                      ${opt.votes.length} hlasů ${isWinner ? '★' : ''}
+                    </span>
+                  </button>
+                `;
+              }).join('')}
+            </div>
           </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     // --- HISTORIE HER ---
-    function openGameModal() {
+    function openGameModal(gameId = null) {
       if (!currentUser || currentUser.role !== 'ADMIN') return;
+      
+      editingGameId = gameId;
+      const modalTitle = document.getElementById('game-modal-title');
+      
+      if (gameId) {
+        modalTitle.textContent = 'Upravit hru';
+        const game = games.find(g => g.id === gameId);
+        if (game) {
+          document.getElementById('game-title-input').value = game.title;
+          document.getElementById('game-winner-input').value = game.winningTeam;
+          
+          tempGameCharacters = [...characters];
+          tempGamePlayers = game.players ? game.players.map(p => {
+            const userObj = users.find(u => u.name === p.studentName);
+            return {
+              userId: userObj ? userObj.id : '',
+              charName: p.charName,
+              startAlignment: p.startAlignment || 'GOOD',
+              endAlignment: p.endAlignment || 'GOOD'
+            };
+          }) : [];
+        }
+      } else {
+        modalTitle.textContent = 'Zapsat novou hru';
+        document.getElementById('add-game-form').reset();
+        tempGamePlayers = [];
+        tempGameCharacters = [...characters];
+      }
+
       document.getElementById('game-modal').classList.remove('hidden');
-      tempGamePlayers = [];
-      tempGameCharacters = [...characters]; // Načtení globálních postav jako výchozích
       renderModalPlayersRows();
     }
 
     function closeGameModal() {
       document.getElementById('game-modal').classList.add('hidden');
       document.getElementById('add-game-form').reset();
+      editingGameId = null;
     }
 
     function handleGameScriptUpload(e) {
@@ -370,7 +481,17 @@
         };
       });
 
-      games.unshift({ id: Date.now(), title, winningTeam, date, players: evaluatedPlayers });
+      if (editingGameId) {
+        const gameIndex = games.findIndex(g => g.id === editingGameId);
+        if (gameIndex !== -1) {
+          games[gameIndex].title = title;
+          games[gameIndex].winningTeam = winningTeam;
+          games[gameIndex].players = evaluatedPlayers;
+        }
+      } else {
+        games.unshift({ id: Date.now(), title, winningTeam, date, players: evaluatedPlayers });
+      }
+
       await saveState();
       closeGameModal();
       renderGames();
@@ -397,8 +518,13 @@
 
       container.innerHTML = games.map(g => `
         <div class="bg-gray-900 border ${g.winningTeam === 'GOOD' ? 'border-blue-600/50' : 'border-red-600/50'} p-5 rounded-xl mb-4 shadow-lg relative">
-          ${isAdmin ? `<button onclick="deleteGame(${g.id})" class="absolute top-4 right-4 text-red-400 hover:text-red-300 text-sm" title="Smazat hru"><i class="fa-solid fa-trash"></i></button>` : ''}
-          <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-3 mb-3 gap-2 pr-8">
+          ${isAdmin ? `
+            <div class="absolute top-4 right-4 flex gap-2">
+              <button onclick="openGameModal(${g.id})" class="text-yellow-400 hover:text-yellow-300 text-sm p-1" title="Upravit hru"><i class="fa-solid fa-pen"></i></button>
+              <button onclick="deleteGame(${g.id})" class="text-red-400 hover:text-red-300 text-sm p-1" title="Smazat hru"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          ` : ''}
+          <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-3 mb-3 gap-2 pr-16">
             <div>
               <h3 class="text-lg font-bold text-white magic-font">${g.title}</h3>
               <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${g.winningTeam === 'GOOD' ? 'bg-blue-950 text-blue-400 border border-blue-700' : 'bg-red-950 text-red-400 border border-red-700'}">
@@ -441,7 +567,7 @@
         Gryffindor: { name: 'Nebelvír', color: 'border-red-700 bg-red-950/30 text-red-400', icon: 'fa-shield-halved' },
         Slytherin: { name: 'Zmijozel', color: 'border-green-700 bg-green-950/30 text-green-400', icon: 'fa-staff-snake' },
         Ravenclaw: { name: 'Havraspár', color: 'border-blue-700 bg-blue-950/30 text-blue-400', icon: 'fa-feather' },
-        Hufflepuff: { name: 'Mrzipus', color: 'border-yellow-700 bg-yellow-950/30 text-yellow-400', icon: 'fa-sun' }
+        Hufflepuff: { name: 'Mrzimor', color: 'border-yellow-700 bg-yellow-950/30 text-yellow-400', icon: 'fa-sun' }
       };
 
       container.innerHTML = Object.keys(housesMeta).map(key => {
@@ -510,6 +636,8 @@
         return;
       }
 
+      const houseDisplayMap = { Gryffindor: 'Nebelvír', Slytherin: 'Zmijozel', Ravenclaw: 'Havraspár', Hufflepuff: 'Mrzimor' };
+
       container.innerHTML = `
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm text-gray-300">
@@ -526,7 +654,7 @@
                 <tr class="hover:bg-gray-900/50">
                   <td class="p-3 font-semibold text-white">${p.name}</td>
                   <td class="p-3 text-gray-400">${p.username}</td>
-                  <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs font-bold bg-gray-800 text-yellow-400">${p.house}</span></td>
+                  <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs font-bold bg-gray-800 text-yellow-400">${houseDisplayMap[p.house] || p.house}</span></td>
                   ${isAdmin ? `<td class="p-3 text-right"><button onclick="deleteStudent(${p.id})" class="text-red-400 hover:text-red-300 text-xs"><i class="fa-solid fa-trash"></i> Smazat</button></td>` : ''}
                 </tr>
               `).join('')}
@@ -672,7 +800,7 @@
               <option value="Gryffindor">Nebelvír</option>
               <option value="Slytherin">Zmijozel</option>
               <option value="Ravenclaw">Havraspár</option>
-              <option value="Hufflepuff">Mrzipus</option>
+              <option value="Hufflepuff">Mrzimor</option>
             </select>
             <button type="submit" class="gold-bg text-black font-bold py-2 rounded lg:col-span-4 hover:opacity-90 transition">Registrovat studenta</button>
           </form>
@@ -704,7 +832,7 @@
   <div id="poll-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-gray-900 border border-yellow-600/40 p-6 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="text-xl font-bold text-yellow-400 magic-font">Nová anketa</h3>
+        <h3 id="poll-modal-title" class="text-xl font-bold text-yellow-400 magic-font">Nová anketa</h3>
         <button onclick="closePollModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
       </div>
       <form id="add-poll-form" onsubmit="savePoll(event)" class="space-y-4">
@@ -725,7 +853,7 @@
         </div>
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
           <button type="button" onclick="closePollModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 text-sm">Zrušit</button>
-          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded hover:opacity-90 text-sm">Vytvořit anketu</button>
+          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded hover:opacity-90 text-sm">Uložit anketu</button>
         </div>
       </form>
     </div>
@@ -735,7 +863,7 @@
   <div id="game-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-gray-900 border border-yellow-600/40 p-6 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="text-xl font-bold text-yellow-400 magic-font">Zapsat novou hru</h3>
+        <h3 id="game-modal-title" class="text-xl font-bold text-yellow-400 magic-font">Zapsat novou hru</h3>
         <button onclick="closeGameModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
       </div>
       <form id="add-game-form" onsubmit="saveGame(event)" class="space-y-4">
@@ -777,3 +905,4 @@
 
 </body>
 </html>
+</a_file_content>
