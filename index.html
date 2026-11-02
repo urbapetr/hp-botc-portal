@@ -6,6 +6,8 @@
   <title>Harry Potter x Blood on the Clocktower</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Supabase JS Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Inter:wght@300;400;600;700&display=swap');
     body { font-family: 'Inter', sans-serif; background-color: #0b0c10; color: #c5c6c7; }
@@ -15,12 +17,10 @@
     .gold-bg { background-color: #d4af37; }
   </style>
   <script>
-    const STORAGE_USERS = 'hp_botc_users';
-    const STORAGE_GAMES = 'hp_botc_games';
-    const STORAGE_ITEMS = 'hp_botc_items';
-    const STORAGE_POLLS = 'hp_botc_polls';
-    const STORAGE_CHARS = 'hp_botc_chars';
-    const STORAGE_HOUSE_POINTS = 'hp_botc_house_points';
+    // Supabase Konfigurace
+    const SUPABASE_URL = "https://tnvftxeohsxwazsnwfip.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_5Q1t0ZNLRaL7lBaEsjRCPw_tDmAs..."; 
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const defaultUsers = [
       { id: 1, username: 'admin', password: 'bradavice', name: 'Vypravěč (GM)', role: 'ADMIN', house: 'None', points: 0 },
@@ -30,22 +30,73 @@
     const defaultHousePoints = { Gryffindor: 150, Slytherin: 120, Ravenclaw: 140, Hufflepuff: 110 };
 
     let currentUser = null;
-    let users = JSON.parse(localStorage.getItem(STORAGE_USERS)) || defaultUsers;
-    let characters = JSON.parse(localStorage.getItem(STORAGE_CHARS)) || [];
-    let games = JSON.parse(localStorage.getItem(STORAGE_GAMES)) || [];
-    let items = JSON.parse(localStorage.getItem(STORAGE_ITEMS)) || [];
-    let polls = JSON.parse(localStorage.getItem(STORAGE_POLLS)) || [];
-    let housePoints = JSON.parse(localStorage.getItem(STORAGE_HOUSE_POINTS)) || defaultHousePoints;
+    let users = defaultUsers;
+    let characters = [];
+    let games = [];
+    let items = [];
+    let polls = [];
+    let housePoints = defaultHousePoints;
     let activeTab = 'characters';
 
-    function saveState() {
-      localStorage.setItem(STORAGE_USERS, JSON.stringify(users));
-      localStorage.setItem(STORAGE_CHARS, JSON.stringify(characters));
-      localStorage.setItem(STORAGE_GAMES, JSON.stringify(games));
-      localStorage.setItem(STORAGE_ITEMS, JSON.stringify(items));
-      localStorage.setItem(STORAGE_POLLS, JSON.stringify(polls));
-      localStorage.setItem(STORAGE_HOUSE_POINTS, JSON.stringify(housePoints));
+    // Načtení dat ze Supabase
+    async function loadStateFromCloud() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('app_data')
+          .select('payload')
+          .eq('id', 1)
+          .single();
+
+        if (error) {
+          console.error('Chyba při načítání ze Supabase:', error);
+          return;
+        }
+
+        if (data && data.payload) {
+          const p = data.payload;
+          users = p.users || defaultUsers;
+          characters = p.characters || [];
+          games = p.games || [];
+          items = p.items || [];
+          polls = p.polls || [];
+          housePoints = p.housePoints || defaultHousePoints;
+        }
+      } catch (err) {
+        console.error('Chyba připojení k databázi:', err);
+      }
     }
+
+    // Uložení dat do Supabase
+    async function saveState() {
+      const payloadData = {
+        users,
+        characters,
+        games,
+        items,
+        polls,
+        housePoints
+      };
+
+      try {
+        const { error } = await supabaseClient
+          .from('app_data')
+          .upsert({ id: 1, payload: payloadData });
+
+        if (error) {
+          console.error('Chyba při ukládání do Supabase:', error);
+        } else {
+          console.log('Data úspěšně synchronizována do cloudu.');
+        }
+      } catch (err) {
+        console.error('Chyba připojení k databázi:', err);
+      }
+    }
+
+    // Inicializace aplikace po startu
+    window.addEventListener('DOMContentLoaded', async () => {
+      await loadStateFromCloud();
+      renderCurrentTab();
+    });
 
     function fillLogin(u, p) {
       document.getElementById('login-username').value = u;
@@ -106,11 +157,11 @@
       if (activeTab === 'admin') renderAdminUsers();
     }
 
-    function uploadCharactersScript(e) {
+    async function uploadCharactersScript(e) {
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = function(evt) {
+      reader.onload = async function(evt) {
         try {
           const json = JSON.parse(evt.target.result);
           if (Array.isArray(json)) {
@@ -123,7 +174,7 @@
               onScript: true,
               hiddenForPlayers: false
             }));
-            saveState();
+            await saveState();
             renderCharacters();
             alert(`Úspěšně nahráno ${characters.length} postav!`);
           } else {
@@ -136,20 +187,20 @@
       reader.readAsText(file);
     }
 
-    function toggleCharScript(id) {
+    async function toggleCharScript(id) {
       const char = characters.find(c => c.id === id);
       if (char) {
         char.onScript = !char.onScript;
-        saveState();
+        await saveState();
         renderCharacters();
       }
     }
 
-    function toggleCharHidden(id) {
+    async function toggleCharHidden(id) {
       const char = characters.find(c => c.id === id);
       if (char) {
         char.hiddenForPlayers = !char.hiddenForPlayers;
-        saveState();
+        await saveState();
         renderCharacters();
       }
     }
@@ -157,7 +208,10 @@
     function renderCharacters() {
       const container = document.getElementById('characters-container');
       const isAdmin = currentUser && currentUser.role === 'ADMIN';
-      document.getElementById('char-upload-admin-area').className = isAdmin ? 'mb-6 p-4 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
+      const uploadArea = document.getElementById('char-upload-admin-area');
+      if (uploadArea) {
+        uploadArea.className = isAdmin ? 'mb-6 p-4 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
+      }
 
       let visible = characters;
       if (!isAdmin) {
@@ -197,4 +251,94 @@
                 <button onclick="toggleCharScript('${c.id}')" class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-white transition">
                   ${c.onScript ? '✓ Na Scriptu' : '✕ Mimo Script'}
                 </button>
-                <button onclick="toggle
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderGames() {}
+    function renderPlayers() {}
+    function renderLeaderboard() {}
+    function renderAdminUsers() {}
+  </script>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- LOGIN SCREEN -->
+  <div id="login-screen" class="flex-grow flex items-center justify-center p-4">
+    <div class="bg-gray-900 border border-yellow-600/40 p-8 rounded-2xl shadow-2xl w-full max-w-md">
+      <h1 class="text-2xl font-bold text-center mb-6 gold-text magic-font">Bradavický Portál</h1>
+      <form onsubmit="handleLogin(event)" class="space-y-4">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Uživatelské jméno</label>
+          <input type="text" id="login-username" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 focus:outline-none" required>
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Heslo</label>
+          <input type="password" id="login-password" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 focus:outline-none" required>
+        </div>
+        <button type="submit" class="w-full gold-bg text-black font-bold py-3 rounded-lg hover:opacity-95 transition magic-font">Vstoupit do portálu</button>
+      </form>
+      <div class="mt-6 flex justify-center gap-4 text-sm">
+        <button onclick="fillLogin('admin', 'bradavice')" class="text-yellow-500 hover:underline">Rychlý GM login</button>
+        <button onclick="fillLogin('hrac', 'bradavice')" class="text-blue-400 hover:underline">Rychlý Hráč login</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- APP SCREEN -->
+  <div id="app-screen" class="hidden flex-grow flex flex-col">
+    <header class="bg-black/80 border-b border-yellow-600/30 p-4 flex justify-between items-center">
+      <div class="flex items-center space-x-4">
+        <h1 class="text-xl font-bold gold-text magic-font">BotC Bradavice</h1>
+        <span class="text-xs bg-gray-800 px-3 py-1 rounded-full border border-gray-700 text-gray-300">
+          Uživatel: <strong id="user-display-name" class="text-white"></strong> (<span id="user-display-role"></span>)
+        </span>
+      </div>
+      <button onclick="logout()" class="text-red-400 hover:text-red-300 text-sm font-semibold"><i class="fa-solid fa-right-from-bracket"></i> Odhlásit</button>
+    </header>
+
+    <nav class="bg-gray-900 border-b border-gray-800 flex overflow-x-auto px-4">
+      <button onclick="switchTab('characters')" id="tab-btn-characters" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-yellow-500 text-yellow-400 whitespace-nowrap">Postavy & Script</button>
+      <button onclick="switchTab('games')" id="tab-btn-games" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Historie her</button>
+      <button onclick="switchTab('players')" id="tab-btn-players" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Studenti</button>
+      <button onclick="switchTab('leaderboard')" id="tab-btn-leaderboard" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Bodování kolejí</button>
+      <button onclick="switchTab('admin')" id="tab-btn-admin" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap hidden">Admin Správa</button>
+    </nav>
+
+    <main class="flex-grow p-6 max-w-7xl mx-auto w-full">
+      <!-- TAB: CHARACTERS -->
+      <div id="tab-content-characters" class="tab-content">
+        <div id="char-upload-admin-area" class="hidden">
+          <label class="block text-sm font-semibold text-yellow-400 mb-2">Nahnat JSON Script postav:</label>
+          <input type="file" accept=".json" onchange="uploadCharactersScript(event)" class="text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-yellow-500 file:text-black hover:file:bg-yellow-400 cursor-pointer">
+        </div>
+        <div id="characters-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+      </div>
+
+      <!-- TAB: GAMES -->
+      <div id="tab-content-games" class="tab-content hidden">
+        <h2 class="text-xl font-bold mb-4 magic-font">Historie her</h2>
+      </div>
+
+      <!-- TAB: PLAYERS -->
+      <div id="tab-content-players" class="tab-content hidden">
+        <h2 class="text-xl font-bold mb-4 magic-font">Seznam studentů</h2>
+      </div>
+
+      <!-- TAB: LEADERBOARD -->
+      <div id="tab-content-leaderboard" class="tab-content hidden">
+        <h2 class="text-xl font-bold mb-4 magic-font">Bodování kolejí</h2>
+      </div>
+
+      <!-- TAB: ADMIN -->
+      <div id="tab-content-admin" class="tab-content hidden">
+        <h2 class="text-xl font-bold mb-4 magic-font">Administrace</h2>
+      </div>
+    </main>
+  </div>
+
+</body>
+</html>
