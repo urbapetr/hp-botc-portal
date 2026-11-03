@@ -116,7 +116,7 @@
         return;
       }
 
-      // Ověření přes oficiální Supabase Auth (funguje pro admina i studenty s vytvořeným Auth účtem)
+      // Ověření přes oficiální Supabase Auth
       const { data, error } = await supabaseClient.auth.signInWithPassword({
         email: inputId,
         password: inputPass
@@ -129,14 +129,14 @@
 
       const authUser = data.user;
 
-      // Najdeme profil v našem JSONu podle e-mailu nebo ID ze Supabase
+      // Najdeme profil v JSONu podle e-mailu nebo ID ze Supabase
       let found = users.find(u => 
         (u.email && u.email.toLowerCase() === inputId.toLowerCase()) || 
         (u.id === authUser.id)
       );
 
-      // Pokud je to tvůj administrátorský e-mail a ještě nemá záznam v JSONu, vytvoříme ho
-      if (!found && inputId.toLowerCase() === 'minecraftpetr2001@gmail.com') {
+      // Podpora pro vytvoření hlavní administrátorské role
+      if (!found && (inputId.toLowerCase() === 'mragnl@bradavice.sts' || inputId.toLowerCase() === 'minecraftpetr2001@gmail.com')) {
         found = { 
           id: authUser.id, 
           email: inputId,
@@ -320,7 +320,7 @@
       if (hasVotedThis) {
         poll.options[optionIndex].votes = poll.options[optionIndex].votes.filter(id => id !== currentUser.id);
       } else {
-        if (userVotesCount >= poll.maxVotes) return alert(`Maximalne ${poll.maxVotes} hlasů!`);
+        if (userVotesCount >= poll.maxVotes) return alert(`Maximálně ${poll.maxVotes} hlasů!`);
         poll.options[optionIndex].votes.push(currentUser.id);
       }
 
@@ -685,7 +685,6 @@
             <thead class="bg-gray-900 text-yellow-500 magic-font uppercase text-xs">
               <tr>
                 <th class="p-3">Jméno / Stream</th>
-                <th class="p-3">E-mail (Auth)</th>
                 <th class="p-3">Role</th>
                 <th class="p-3">Kolej</th>
                 <th class="p-3">Body</th>
@@ -703,8 +702,7 @@
                 return `
                   <tr class="hover:bg-gray-900/50">
                     <td class="p-3">${nameHtml}</td>
-                    <td class="p-3 text-gray-400 text-xs">${p.email || '-'}</td>
-                    <td class="p-3"><span class="px-2.5 py-0.5 rounded text-xs font-bold ${p.role === 'ADMIN' ? 'bg-yellow-950 text-yellow-400 border border-yellow-700' : 'bg-gray-800 text-blue-400'}">${p.role === 'ADMIN' ? 'Admin' : 'Student'}</span></td>
+                    <td class="p-3"><span class="px-2.5 py-0.5 rounded text-xs font-bold ${p.role === 'ADMIN' ? 'bg-yellow-950 text-yellow-400 border border-yellow-700' : 'bg-gray-800 text-blue-400'}">${p.role === 'ADMIN' ? 'Učitel' : 'Student'}</span></td>
                     <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs font-bold ${houseInfo.class}">${houseInfo.name}</span></td>
                     <td class="p-3 font-extrabold text-white">${p.role === 'PLAYER' ? `${p.points || 0} b` : '-'}</td>
                     ${isAdmin ? `
