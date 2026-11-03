@@ -20,9 +20,8 @@
     const SUPABASE_ANON_KEY = "sb_publishable_to3lCwqIAYz3vQgq0gVK-w_Y4nLAbTN"; 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // Výchozí anonymní účet diváka pro rychlý přístup
     const defaultUsers = [
-      { id: 3, username: 'divak', password: 'bradavice', name: 'Divák zvenčí', role: 'SPECTATOR', house: 'None', points: 0, stream: '' }
+      { id: 'divak-id', username: 'divak', name: 'Divák zvenčí', role: 'SPECTATOR', house: 'None', points: 0, stream: '' }
     ];
 
     const defaultHousePoints = { Gryffindor: 0, Slytherin: 0, Ravenclaw: 0, Hufflepuff: 0 };
@@ -107,27 +106,19 @@
 
     async function handleLogin(e) {
       if (e) e.preventDefault();
-      const inputEmail = document.getElementById('login-username').value.trim();
+      const inputId = document.getElementById('login-username').value.trim();
       const inputPass = document.getElementById('login-password').value.trim();
 
-      // Speciální volba pro anonymního diváka
-      if (inputEmail.toLowerCase() === 'divak' && inputPass === 'bradavice') {
-        let spectatorUser = users.find(u => u.role === 'SPECTATOR');
-        if (!spectatorUser) {
-          spectatorUser = defaultUsers[0];
-        }
-        currentUser = spectatorUser;
-        document.getElementById('login-screen').classList.add('hidden');
-        document.getElementById('app-screen').classList.remove('hidden');
-        document.getElementById('user-display-name').textContent = currentUser.name;
-        document.getElementById('user-display-role').textContent = 'Divák';
-        renderCurrentTab();
+      // Speciální rychlý přístup pro diváka
+      if (inputId.toLowerCase() === 'divak' && inputPass === 'bradavice') {
+        currentUser = users.find(u => u.role === 'SPECTATOR') || defaultUsers[0];
+        showAppScreen();
         return;
       }
 
-      // 1. Ověření přihlášení přes oficiální Supabase Auth
+      // Ověření přes oficiální Supabase Auth (funguje pro admina i studenty s vytvořeným Auth účtem)
       const { data, error } = await supabaseClient.auth.signInWithPassword({
-        email: inputEmail,
+        email: inputId,
         password: inputPass
       });
 
@@ -136,21 +127,19 @@
         return;
       }
 
-      // 2. ID přihlášeného uživatele ze Supabase Auth
       const authUser = data.user;
 
-      // 3. Najdeme profil uživatele podle e-mailu nebo ID
+      // Najdeme profil v našem JSONu podle e-mailu nebo ID ze Supabase
       let found = users.find(u => 
-        (u.email && u.email.toLowerCase() === inputEmail.toLowerCase()) || 
-        (u.username && u.username.toLowerCase() === inputEmail.toLowerCase()) ||
+        (u.email && u.email.toLowerCase() === inputId.toLowerCase()) || 
         (u.id === authUser.id)
       );
 
-      // Pokud se přihlásil hlavní administrátor a ještě nemá profil v JSONu uživatelů, automaticky ho vytvoříme
-      if (!found && inputEmail.toLowerCase() === 'minecraftpetr2001@gmail.com') {
+      // Pokud je to tvůj administrátorský e-mail a ještě nemá záznam v JSONu, vytvoříme ho
+      if (!found && inputId.toLowerCase() === 'minecraftpetr2001@gmail.com') {
         found = { 
           id: authUser.id, 
-          email: inputEmail,
+          email: inputId,
           username: 'MrAgnl', 
           name: 'MrAgnl', 
           role: 'ADMIN', 
@@ -164,19 +153,23 @@
 
       if (found) {
         currentUser = found;
-        document.getElementById('login-screen').classList.add('hidden');
-        document.getElementById('app-screen').classList.remove('hidden');
-        document.getElementById('user-display-name').textContent = currentUser.name;
-        
-        let roleName = 'Hráč';
-        if (currentUser.role === 'ADMIN') roleName = 'Učitel (Admin / GM)';
-        if (currentUser.role === 'SPECTATOR') roleName = 'Divák';
-        document.getElementById('user-display-role').textContent = roleName;
-
-        renderCurrentTab();
+        showAppScreen();
       } else {
-        alert('Přihlášení proběhlo úspěšně, ale uživatel nemá nastavenou roli v aplikaci.');
+        alert('Přihlášení v Auth proběhlo, ale uživatel nemá vytvořený profil v aplikaci. Požádej administrátora o registraci.');
       }
+    }
+
+    function showAppScreen() {
+      document.getElementById('login-screen').classList.add('hidden');
+      document.getElementById('app-screen').classList.remove('hidden');
+      document.getElementById('user-display-name').textContent = currentUser.name;
+      
+      let roleName = 'Hráč';
+      if (currentUser.role === 'ADMIN') roleName = 'Učitel (Admin / GM)';
+      if (currentUser.role === 'SPECTATOR') roleName = 'Divák';
+      document.getElementById('user-display-role').textContent = roleName;
+
+      renderCurrentTab();
     }
 
     function logout() {
@@ -227,10 +220,7 @@
         if (poll) {
           document.getElementById('poll-title-input').value = poll.title;
           document.getElementById('poll-max-votes').value = poll.maxVotes || 1;
-          
-          poll.options.forEach(opt => {
-            addPollOptionInput(opt.text);
-          });
+          poll.options.forEach(opt => addPollOptionInput(opt.text));
         }
       } else {
         modalTitle.textContent = 'Nová anketa';
@@ -238,7 +228,6 @@
         addPollOptionInput();
         addPollOptionInput();
       }
-
       document.getElementById('poll-modal').classList.remove('hidden');
     }
 
@@ -251,10 +240,7 @@
     function addPollOptionInput(initialValue = '') {
       const container = document.getElementById('poll-options-container');
       const count = container.children.length;
-      if (count >= 10) {
-        alert('Lze přidat maximálně 10 možností!');
-        return;
-      }
+      if (count >= 10) return alert('Max 10 možností!');
       const div = document.createElement('div');
       div.className = "flex gap-2 items-center";
       div.innerHTML = `
@@ -277,23 +263,16 @@
         if (val) newOptionsText.push(val);
       });
 
-      if (newOptionsText.length < 2) {
-        alert('Anketa musí mít alespoň 2 možnosti!');
-        return;
-      }
+      if (newOptionsText.length < 2) return alert('Anketa musí mít alespoň 2 možnosti!');
 
       if (editingPollId) {
         const poll = polls.find(p => p.id === editingPollId);
         if (poll) {
           poll.title = title;
           poll.maxVotes = maxVotes;
-          
           poll.options = newOptionsText.map(text => {
             const existingOpt = poll.options.find(o => o.text === text);
-            return {
-              text: text,
-              votes: existingOpt ? existingOpt.votes : []
-            };
+            return { text: text, votes: existingOpt ? existingOpt.votes : [] };
           });
         }
       } else {
@@ -331,10 +310,7 @@
     }
 
     async function votePoll(pollId, optionIndex) {
-      if (!currentUser || currentUser.role === 'SPECTATOR') {
-        alert('Diváci nemohou hlasovat v anketách.');
-        return;
-      }
+      if (!currentUser || currentUser.role === 'SPECTATOR') return alert('Diváci nemohou hlasovat.');
       const poll = polls.find(p => p.id === pollId);
       if (!poll || poll.closed) return;
 
@@ -344,10 +320,7 @@
       if (hasVotedThis) {
         poll.options[optionIndex].votes = poll.options[optionIndex].votes.filter(id => id !== currentUser.id);
       } else {
-        if (userVotesCount >= poll.maxVotes) {
-          alert(`V této anketě můžeš hlasovat maximálně pro ${poll.maxVotes} možnosti!`);
-          return;
-        }
+        if (userVotesCount >= poll.maxVotes) return alert(`Maximalne ${poll.maxVotes} hlasů!`);
         poll.options[optionIndex].votes.push(currentUser.id);
       }
 
@@ -370,36 +343,24 @@
         if (p.closed && p.options) {
           maxVotesCount = Math.max(...p.options.map(o => o.votes ? o.votes.length : 0));
         }
-
         return `
           <div class="bg-gray-900 border ${p.closed ? 'border-red-900/40 bg-gray-950/80' : 'border-yellow-600/30'} p-5 rounded-xl mb-4 shadow-lg relative">
             ${isAdmin ? `
               <div class="absolute top-4 right-4 flex gap-2">
-                <button onclick="openPollModal(${p.id})" class="text-yellow-400 hover:text-yellow-300 text-sm p-1" title="Upravit anketu"><i class="fa-solid fa-pen"></i></button>
-                <button onclick="togglePollClose(${p.id})" class="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">
-                  ${p.closed ? '<i class="fa-solid fa-lock-open mr-1"></i> Otevřít' : '<i class="fa-solid fa-lock mr-1"></i> Uzavřít'}
-                </button>
-                <button onclick="deletePoll(${p.id})" class="text-red-400 hover:text-red-300 text-sm p-1" title="Smazat anketu"><i class="fa-solid fa-trash"></i></button>
+                <button onclick="openPollModal(${p.id})" class="text-yellow-400 hover:text-yellow-300 text-sm p-1" title="Upravit"><i class="fa-solid fa-pen"></i></button>
+                <button onclick="togglePollClose(${p.id})" class="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">${p.closed ? 'Otevřít' : 'Uzavřít'}</button>
+                <button onclick="deletePoll(${p.id})" class="text-red-400 hover:text-red-300 text-sm p-1" title="Smazat"><i class="fa-solid fa-trash"></i></button>
               </div>
             ` : ''}
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-2 pr-28 gap-2">
-              <h3 class="text-lg font-bold text-white magic-font flex items-center gap-2">
-                ${p.title}
-                ${p.closed ? '<span class="text-xs bg-red-950 text-red-400 border border-red-700 px-2 py-0.5 rounded uppercase font-sans font-bold">UZAVŘENO</span>' : ''}
-              </h3>
-              <span class="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 px-2.5 py-1 rounded-full font-semibold w-fit">Max ${p.maxVotes} hlas/ů</span>
-            </div>
+            <h3 class="text-lg font-bold text-white magic-font mb-2">${p.title} ${p.closed ? '<span class="text-xs bg-red-950 text-red-400 border border-red-700 px-2 py-0.5 rounded">UZAVŘENO</span>' : ''}</h3>
             <div class="space-y-2 mt-4">
               ${p.options.map((opt, idx) => {
                 const hasVoted = currentUser && opt.votes.includes(currentUser.id);
                 const isWinner = p.closed && maxVotesCount > 0 && opt.votes.length === maxVotesCount;
-
                 return `
-                  <button onclick="votePoll(${p.id}, ${idx})" ${p.closed ? 'disabled' : ''} class="w-full text-left p-3 rounded-lg border ${hasVoted ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-gray-800 bg-black/40 text-gray-300'} ${p.closed ? 'cursor-not-allowed opacity-90' : 'hover:border-yellow-600'} transition flex justify-between items-center">
+                  <button onclick="votePoll(${p.id}, ${idx})" ${p.closed ? 'disabled' : ''} class="w-full text-left p-3 rounded-lg border ${hasVoted ? 'border-yellow-500 bg-yellow-500/20 text-yellow-300' : 'border-gray-800 bg-black/40 text-gray-300'} transition flex justify-between items-center">
                     <span class="text-sm font-semibold">${opt.text}</span>
-                    <span class="text-xs px-2.5 py-1 rounded-full font-bold ${isWinner ? 'bg-green-600 text-white font-extrabold shadow-lg shadow-green-900/50' : 'bg-gray-800 text-gray-400'}">
-                      ${opt.votes.length} hlasů ${isWinner ? '★' : ''}
-                    </span>
+                    <span class="text-xs px-2.5 py-1 rounded-full font-bold ${isWinner ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400'}">${opt.votes.length} hlasů ${isWinner ? '★' : ''}</span>
                   </button>
                 `;
               }).join('')}
@@ -412,26 +373,18 @@
     // --- HISTORIE HER ---
     function openGameModal(gameId = null) {
       if (!currentUser || currentUser.role !== 'ADMIN') return;
-      
       editingGameId = gameId;
       const modalTitle = document.getElementById('game-modal-title');
-      
       if (gameId) {
         modalTitle.textContent = 'Upravit hru';
         const game = games.find(g => g.id === gameId);
         if (game) {
           document.getElementById('game-title-input').value = game.title;
           document.getElementById('game-winner-input').value = game.winningTeam;
-          
           tempGameCharacters = [...characters];
           tempGamePlayers = game.players ? game.players.map(p => {
             const userObj = users.find(u => u.name === p.studentName);
-            return {
-              userId: userObj ? userObj.id : '',
-              charName: p.charName,
-              startAlignment: p.startAlignment || 'GOOD',
-              endAlignment: p.endAlignment || 'GOOD'
-            };
+            return { userId: userObj ? userObj.id : '', charName: p.charName, startAlignment: p.startAlignment || 'GOOD', endAlignment: p.endAlignment || 'GOOD' };
           }) : [];
         }
       } else {
@@ -440,7 +393,6 @@
         tempGamePlayers = [];
         tempGameCharacters = [...characters];
       }
-
       document.getElementById('game-modal').classList.remove('hidden');
       renderModalPlayersRows();
     }
@@ -459,27 +411,17 @@
         try {
           const json = JSON.parse(evt.target.result);
           if (Array.isArray(json)) {
-            tempGameCharacters = json.filter(item => item && item.name && item.team && item.team !== 'meta').map(item => ({
-              name: item.name,
-              team: item.team || 'townsfolk'
-            }));
+            tempGameCharacters = json.filter(item => item && item.name && item.team && item.team !== 'meta').map(item => ({ name: item.name, team: item.team || 'townsfolk' }));
             renderModalPlayersRows();
-            alert(`Scénář úspěšně nahrán (${tempGameCharacters.length} postav)!`);
-          } else {
-            alert('JSON nemá správný formát pole.');
+            alert(`Scénář nahrán (${tempGameCharacters.length} postav).`);
           }
-        } catch (err) {
-          alert('Chyba při čtení JSON souboru.');
-        }
+        } catch (err) { alert('Chyba JSON.'); }
       };
       reader.readAsText(file);
     }
 
     function addGamePlayerRow() {
-      if (tempGamePlayers.length >= 20) {
-        alert('Lze přidat maximálně 20 studentů do jedné hry!');
-        return;
-      }
+      if (tempGamePlayers.length >= 20) return;
       tempGamePlayers.push({ userId: '', charName: '', startAlignment: 'GOOD', endAlignment: 'GOOD' });
       renderModalPlayersRows();
     }
@@ -497,35 +439,31 @@
       container.innerHTML = tempGamePlayers.map((p, idx) => `
         <div class="grid grid-cols-1 md:grid-cols-5 gap-2 bg-black/50 p-3 rounded-lg border border-gray-800 items-center mb-2 text-xs">
           <div>
-            <label class="block text-gray-400 text-[10px] mb-0.5">Student</label>
             <select onchange="tempGamePlayers[${idx}].userId = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white" required>
-              <option value="">-- Vybrat studenta --</option>
+              <option value="">-- Student --</option>
               ${registeredPlayers.map(u => `<option value="${u.id}" ${p.userId == u.id ? 'selected' : ''}>${u.name}</option>`).join('')}
             </select>
           </div>
           <div>
-            <label class="block text-gray-400 text-[10px] mb-0.5">Postava</label>
             <select onchange="tempGamePlayers[${idx}].charName = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white" required>
-              <option value="">-- Vybrat postavu --</option>
+              <option value="">-- Postava --</option>
               ${availableChars.map(c => `<option value="${c.name}" ${p.charName === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
             </select>
           </div>
           <div>
-            <label class="block text-gray-400 text-[10px] mb-0.5">Začátek (Příslušnost)</label>
             <select onchange="tempGamePlayers[${idx}].startAlignment = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white">
               <option value="GOOD" ${p.startAlignment === 'GOOD' ? 'selected' : ''}>Dobro</option>
               <option value="EVIL" ${p.startAlignment === 'EVIL' ? 'selected' : ''}>Zlo</option>
             </select>
           </div>
           <div>
-            <label class="block text-gray-400 text-[10px] mb-0.5">Konec (Příslušnost)</label>
             <select onchange="tempGamePlayers[${idx}].endAlignment = this.value" class="w-full bg-gray-900 border border-gray-700 rounded p-1 text-white">
               <option value="GOOD" ${p.endAlignment === 'GOOD' ? 'selected' : ''}>Dobro</option>
               <option value="EVIL" ${p.endAlignment === 'EVIL' ? 'selected' : ''}>Zlo</option>
             </select>
           </div>
-          <div class="flex justify-end items-end h-full">
-            <button type="button" onclick="removeGamePlayerRow(${idx})" class="text-red-400 hover:text-red-300 p-1"><i class="fa-solid fa-trash"></i> Odebrat</button>
+          <div class="flex justify-end">
+            <button type="button" onclick="removeGamePlayerRow(${idx})" class="text-red-400 p-1"><i class="fa-solid fa-trash"></i></button>
           </div>
         </div>
       `).join('');
@@ -540,23 +478,18 @@
 
       const evaluatedPlayers = tempGamePlayers.map(p => {
         const studentObj = users.find(u => u.id == p.userId);
-        const isWinner = p.endAlignment === winningTeam;
         return {
           studentName: studentObj ? studentObj.name : 'Neznámý',
           charName: p.charName || 'Nespecifikováno',
           startAlignment: p.startAlignment,
           endAlignment: p.endAlignment,
-          won: isWinner
+          won: p.endAlignment === winningTeam
         };
       });
 
       if (editingGameId) {
-        const gameIndex = games.findIndex(g => g.id === editingGameId);
-        if (gameIndex !== -1) {
-          games[gameIndex].title = title;
-          games[gameIndex].winningTeam = winningTeam;
-          games[gameIndex].players = evaluatedPlayers;
-        }
+        const game = games.find(g => g.id === editingGameId);
+        if (game) { game.title = title; game.winningTeam = winningTeam; game.players = evaluatedPlayers; }
       } else {
         games.unshift({ id: Date.now(), title, winningTeam, date, players: evaluatedPlayers });
       }
@@ -568,7 +501,7 @@
 
     async function deleteGame(gameId) {
       if (!currentUser || currentUser.role !== 'ADMIN') return;
-      if (confirm('Opravdu chcete smazat tuto hru z historie?')) {
+      if (confirm('Smazat hru?')) {
         games = games.filter(g => g.id !== gameId);
         await saveState();
         renderGames();
@@ -581,7 +514,7 @@
       document.getElementById('game-admin-btn-area').className = isAdmin ? 'mb-6' : 'hidden';
 
       if (games.length === 0) {
-        container.innerHTML = `<div class="text-center text-gray-500 py-8">Zatím nebyly odehrány žádné hry.</div>`;
+        container.innerHTML = `<div class="text-center text-gray-500 py-8">Zatím žádné hry.</div>`;
         return;
       }
 
@@ -589,32 +522,19 @@
         <div class="bg-gray-900 border ${g.winningTeam === 'GOOD' ? 'border-blue-600/50' : 'border-red-600/50'} p-5 rounded-xl mb-4 shadow-lg relative">
           ${isAdmin ? `
             <div class="absolute top-4 right-4 flex gap-2">
-              <button onclick="openGameModal(${g.id})" class="text-yellow-400 hover:text-yellow-300 text-sm p-1" title="Upravit hru"><i class="fa-solid fa-pen"></i></button>
-              <button onclick="deleteGame(${g.id})" class="text-red-400 hover:text-red-300 text-sm p-1" title="Smazat hru"><i class="fa-solid fa-trash"></i></button>
+              <button onclick="openGameModal(${g.id})" class="text-yellow-400 text-sm p-1"><i class="fa-solid fa-pen"></i></button>
+              <button onclick="deleteGame(${g.id})" class="text-red-400 text-sm p-1"><i class="fa-solid fa-trash"></i></button>
             </div>
           ` : ''}
-          <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-3 mb-3 gap-2 pr-16">
-            <div>
-              <h3 class="text-lg font-bold text-white magic-font">${g.title}</h3>
-              <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${g.winningTeam === 'GOOD' ? 'bg-blue-950 text-blue-400 border border-blue-700' : 'bg-red-950 text-red-400 border border-red-700'}">
-                Vítězná strana: ${g.winningTeam === 'GOOD' ? 'Dobro' : 'Zlo'}
-              </span>
-            </div>
-            <div class="text-xs text-gray-500"><i class="fa-regular fa-calendar mr-1"></i> ${g.date}</div>
+          <h3 class="text-lg font-bold text-white magic-font mb-2">${g.title} (${g.winningTeam === 'GOOD' ? 'Dobro' : 'Zlo'})</h3>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+            ${(g.players || []).map(p => `
+              <div class="p-2 rounded border ${p.won ? 'bg-green-950/20 border-green-800/50 text-green-300' : 'bg-red-950/20 border-red-800/50 text-red-300'} flex justify-between">
+                <div><strong>${p.studentName}</strong> (${p.charName})</div>
+                <span>${p.won ? 'VÝHRA' : 'PROHRA'}</span>
+              </div>
+            `).join('')}
           </div>
-          ${g.players && g.players.length > 0 ? `
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
-              ${g.players.map(p => `
-                <div class="p-2 rounded border ${p.won ? 'bg-green-950/20 border-green-800/50 text-green-300' : 'bg-red-950/20 border-red-800/50 text-red-300'} flex justify-between items-center">
-                  <div>
-                    <strong class="text-white">${p.studentName}</strong> (${p.charName})
-                    <div class="text-[10px] text-gray-400">Příslušnost: ${p.startAlignment === 'GOOD' ? 'Dobro' : 'Zlo'} → ${p.endAlignment === 'GOOD' ? 'Dobro' : 'Zlo'}</div>
-                  </div>
-                  <span class="font-bold px-1.5 py-0.5 rounded ${p.won ? 'bg-green-900 text-green-200' : 'bg-red-900 text-red-200'}">${p.won ? 'VÝHRA' : 'PROHRA'}</span>
-                </div>
-              `).join('')}
-            </div>
-          ` : '<div class="text-xs text-gray-500">Žádní zapsaní hráči.</div>'}
         </div>
       `).join('');
     }
@@ -631,7 +551,6 @@
     function renderLeaderboard() {
       const container = document.getElementById('house-points-container');
       const isAdmin = currentUser && currentUser.role === 'ADMIN';
-
       const housesMeta = {
         Gryffindor: { name: 'Nebelvír', color: 'border-red-700 bg-red-950/30 text-red-400', icon: 'fa-shield-halved' },
         Slytherin: { name: 'Zmijozel', color: 'border-green-700 bg-green-950/30 text-green-400', icon: 'fa-staff-snake' },
@@ -649,7 +568,7 @@
                 <h3 class="text-2xl font-bold magic-font">${meta.name}</h3>
                 <i class="fa-solid ${meta.icon} text-2xl"></i>
               </div>
-              <div class="text-4xl font-extrabold text-white mb-4 magic-font">${points} <span class="text-sm text-gray-400 font-normal">bodů</span></div>
+              <div class="text-4xl font-extrabold text-white mb-4 magic-font">${points} <span class="text-sm text-gray-400">bodů</span></div>
             </div>
             ${isAdmin ? `
               <div class="border-t border-gray-800 pt-4 grid grid-cols-4 gap-2 text-xs font-bold">
@@ -669,19 +588,18 @@
       e.preventDefault();
       if (!currentUser || currentUser.role !== 'ADMIN') return;
       const name = document.getElementById('student-name').value.trim();
-      const username = document.getElementById('student-username').value.trim();
+      const email = document.getElementById('student-email').value.trim();
       const role = document.getElementById('student-role').value;
       const house = document.getElementById('student-house').value;
       const stream = document.getElementById('student-stream').value.trim();
 
-      if (users.some(u => u.username && u.username.toLowerCase() === username.toLowerCase())) {
-        alert('Uživatel s tímto jménem již existuje!');
-        return;
+      if (users.some(u => u.email && u.email.toLowerCase() === email.toLowerCase())) {
+        return alert('Uživatel s tímto e-mailem již v seznamu existuje!');
       }
 
       users.push({ 
-        id: Date.now(), 
-        username, 
+        id: 'user_' + Date.now(), 
+        email, 
         name, 
         role, 
         house, 
@@ -712,12 +630,10 @@
     async function saveEditedUser(e) {
       e.preventDefault();
       if (!currentUser || currentUser.role !== 'ADMIN' || !editingUserId) return;
-      
       const user = users.find(u => u.id === editingUserId);
       if (user) {
         user.name = document.getElementById('edit-user-name').value.trim();
         user.stream = document.getElementById('edit-user-stream').value.trim();
-        
         await saveState();
         closeEditUserModal();
         renderPlayers();
@@ -750,9 +666,8 @@
       document.getElementById('admin-add-student-area').className = isAdmin ? 'mb-8 p-5 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
 
       const displayUsers = users.filter(u => u.role === 'PLAYER' || u.role === 'ADMIN');
-
       if (displayUsers.length === 0) {
-        container.innerHTML = `<div class="text-center text-gray-500 py-8">Zatím nejsou zapsáni žádní uživatelé.</div>`;
+        container.innerHTML = `<div class="text-center text-gray-500 py-8">Zatím žádní uživatelé.</div>`;
         return;
       }
 
@@ -769,38 +684,39 @@
           <table class="w-full text-left text-sm text-gray-300">
             <thead class="bg-gray-900 text-yellow-500 magic-font uppercase text-xs">
               <tr>
-                <th class="p-3">Jméno</th>
+                <th class="p-3">Jméno / Stream</th>
+                <th class="p-3">E-mail (Auth)</th>
                 <th class="p-3">Role</th>
                 <th class="p-3">Kolej</th>
-                <th class="p-3">Body pro kolej</th>
-                ${isAdmin ? '<th class="p-3 text-right">Akce / Úprava bodů</th>' : ''}
+                <th class="p-3">Body</th>
+                ${isAdmin ? '<th class="p-3 text-right">Akce / Úprava</th>' : ''}
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-800">
               ${displayUsers.map(p => {
                 const houseInfo = houseDisplayMap[p.house] || houseDisplayMap['None'];
                 const hasStream = p.stream && p.stream.trim() !== '';
-                
                 const nameHtml = hasStream 
-                  ? `<a href="${p.stream}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-semibold flex items-center gap-1.5" title="Otevřít stream"><i class="fa-solid fa-video text-xs"></i> ${p.name}</a>`
+                  ? `<a href="${p.stream}" target="_blank" class="text-blue-400 hover:underline font-semibold flex items-center gap-1.5"><i class="fa-solid fa-video text-xs"></i> ${p.name}</a>`
                   : `<span class="font-semibold text-white">${p.name}</span>`;
 
                 return `
                   <tr class="hover:bg-gray-900/50">
                     <td class="p-3">${nameHtml}</td>
-                    <td class="p-3"><span class="px-2.5 py-0.5 rounded text-xs font-bold ${p.role === 'ADMIN' ? 'bg-yellow-950 text-yellow-400 border border-yellow-700' : 'bg-gray-800 text-blue-400'}">${p.role === 'ADMIN' ? 'Učitel (Admin)' : 'Student'}</span></td>
+                    <td class="p-3 text-gray-400 text-xs">${p.email || '-'}</td>
+                    <td class="p-3"><span class="px-2.5 py-0.5 rounded text-xs font-bold ${p.role === 'ADMIN' ? 'bg-yellow-950 text-yellow-400 border border-yellow-700' : 'bg-gray-800 text-blue-400'}">${p.role === 'ADMIN' ? 'Admin' : 'Student'}</span></td>
                     <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs font-bold ${houseInfo.class}">${houseInfo.name}</span></td>
-                    <td class="p-3 font-extrabold text-white">${p.role === 'PLAYER' ? `${p.points || 0} b` : '<span class="text-gray-500 font-normal">-</span>'}</td>
+                    <td class="p-3 font-extrabold text-white">${p.role === 'PLAYER' ? `${p.points || 0} b` : '-'}</td>
                     ${isAdmin ? `
                       <td class="p-3 text-right flex items-center justify-end gap-2">
                         ${p.role === 'PLAYER' ? `
                           <div class="flex items-center gap-1 bg-black/60 p-1 rounded border border-gray-800 text-xs">
-                            <button onclick="updateStudentPoints(${p.id}, 5)" class="px-2 py-0.5 bg-gray-800 hover:bg-green-900 text-green-400 rounded font-bold" title="Přidat 5 bodů">+5</button>
-                            <button onclick="updateStudentPoints(${p.id}, -5)" class="px-2 py-0.5 bg-gray-800 hover:bg-red-900 text-red-400 rounded font-bold" title="Odebrat 5 bodů">-5</button>
+                            <button onclick="updateStudentPoints('${p.id}', 5)" class="px-2 py-0.5 bg-gray-800 text-green-400 rounded font-bold">+5</button>
+                            <button onclick="updateStudentPoints('${p.id}', -5)" class="px-2 py-0.5 bg-gray-800 text-red-400 rounded font-bold">-5</button>
                           </div>
                         ` : ''}
-                        <button onclick="openEditUserModal(${p.id})" class="text-yellow-400 hover:text-yellow-300 text-xs p-1" title="Upravit uživatele"><i class="fa-solid fa-pen"></i></button>
-                        <button onclick="deleteStudent(${p.id})" class="text-red-400 hover:text-red-300 text-xs p-1" title="Smazat uživatele"><i class="fa-solid fa-trash"></i></button>
+                        <button onclick="openEditUserModal('${p.id}')" class="text-yellow-400 p-1" title="Upravit stream"><i class="fa-solid fa-pen"></i></button>
+                        <button onclick="deleteStudent('${p.id}')" class="text-red-400 p-1" title="Smazat"><i class="fa-solid fa-trash"></i></button>
                       </td>
                     ` : ''}
                   </tr>
@@ -822,8 +738,7 @@
         try {
           const json = JSON.parse(evt.target.result);
           if (Array.isArray(json)) {
-            const validItems = json.filter(item => item && item.name && item.team && item.team !== 'meta');
-            characters = validItems.map(item => ({
+            characters = json.filter(item => item && item.name && item.team && item.team !== 'meta').map(item => ({
               id: item.id || Math.random().toString(36).substring(7),
               name: item.name,
               team: item.team || 'townsfolk',
@@ -834,11 +749,9 @@
             }));
             await saveState();
             renderCharacters();
-            alert(`Úspěšně nahráno ${characters.length} postav!`);
+            alert(`Nahráno ${characters.length} postav.`);
           }
-        } catch (err) {
-          alert('Chyba při parsování JSON.');
-        }
+        } catch (err) { alert('Chyba parsování JSON.'); }
       };
       reader.readAsText(file);
     }
@@ -857,17 +770,11 @@
       const container = document.getElementById('characters-container');
       const isAdmin = currentUser && currentUser.role === 'ADMIN';
       const uploadArea = document.getElementById('char-upload-admin-area');
-      if (uploadArea) {
-        uploadArea.className = isAdmin ? 'mb-6 p-4 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
-      }
+      if (uploadArea) uploadArea.className = isAdmin ? 'mb-6 p-4 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
 
-      let displayCharacters = characters;
-      if (!isAdmin) {
-        displayCharacters = characters.filter(c => c.visible !== false);
-      }
-
+      let displayCharacters = isAdmin ? characters : characters.filter(c => c.visible !== false);
       if (displayCharacters.length === 0) {
-        container.innerHTML = `<div class="col-span-full text-center text-gray-500 py-12">Žádné postavy nejsou k dispozici.</div>`;
+        container.innerHTML = `<div class="col-span-full text-center text-gray-500 py-12">Žádné postavy.</div>`;
         return;
       }
 
@@ -878,25 +785,15 @@
               ${c.image ? `<img src="${c.image}" class="w-14 h-14 object-contain rounded-full border border-yellow-500/30 bg-black/40 p-1">` : `<div class="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center text-yellow-500 magic-font text-xl font-bold">${c.name.charAt(0)}</div>`}
               <div>
                 <h3 class="font-bold text-lg text-white magic-font">${c.name}</h3>
-                <div class="flex flex-wrap gap-1 mt-1">
-                  <span class="text-xs font-semibold px-2 py-0.5 rounded-full border border-gray-700 bg-gray-800 text-yellow-400 uppercase tracking-wider">${c.team}</span>
-                  ${c.onScript === false ? '<span class="text-[10px] px-1.5 py-0.5 bg-red-950 text-red-400 border border-red-800 rounded">Mimo script</span>' : ''}
-                  ${c.visible === false ? '<span class="text-[10px] px-1.5 py-0.5 bg-gray-800 text-gray-400 border border-gray-700 rounded">Skryto</span>' : ''}
-                </div>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full border border-gray-700 bg-gray-800 text-yellow-400 uppercase">${c.team}</span>
               </div>
             </div>
-            <p class="text-sm text-gray-300 mb-4 leading-relaxed">${c.ability || 'Bez popisu.'}</p>
+            <p class="text-sm text-gray-300 mb-4">${c.ability || 'Bez popisu.'}</p>
           </div>
           ${isAdmin ? `
             <div class="border-t border-gray-800 pt-3 mt-2 flex justify-between items-center text-xs">
-              <label class="flex items-center gap-1.5 cursor-pointer text-gray-300 hover:text-white">
-                <input type="checkbox" ${c.onScript !== false ? 'checked' : ''} onchange="toggleCharacterProp('${c.id}', 'onScript')" class="rounded bg-black border-gray-700 text-yellow-500 focus:ring-0">
-                <span>Na scriptu</span>
-              </label>
-              <label class="flex items-center gap-1.5 cursor-pointer text-gray-300 hover:text-white">
-                <input type="checkbox" ${c.visible !== false ? 'checked' : ''} onchange="toggleCharacterProp('${c.id}', 'visible')" class="rounded bg-black border-gray-700 text-yellow-500 focus:ring-0">
-                <span>Viditelné pro studenty</span>
-              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer text-gray-300"><input type="checkbox" ${c.onScript !== false ? 'checked' : ''} onchange="toggleCharacterProp('${c.id}', 'onScript')"> Na scriptu</label>
+              <label class="flex items-center gap-1.5 cursor-pointer text-gray-300"><input type="checkbox" ${c.visible !== false ? 'checked' : ''} onchange="toggleCharacterProp('${c.id}', 'visible')"> Viditelné</label>
             </div>
           ` : ''}
         </div>
@@ -912,8 +809,8 @@
       <h1 class="text-2xl font-bold text-center mb-6 gold-text magic-font">Bradavický Portál</h1>
       <form onsubmit="handleLogin(event)" class="space-y-4">
         <div>
-          <label class="block text-sm text-gray-400 mb-1">E-mail / Uživatelské jméno</label>
-          <input type="text" id="login-username" placeholder="minecraftpetr2001@gmail.com" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 focus:outline-none" required>
+          <label class="block text-sm text-gray-400 mb-1">E-mail</label>
+          <input type="text" id="login-username" placeholder="student@bradavice.cz" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 focus:outline-none" required>
         </div>
         <div>
           <label class="block text-sm text-gray-400 mb-1">Heslo</label>
@@ -948,33 +845,28 @@
     </nav>
 
     <main class="flex-grow p-6 max-w-7xl mx-auto w-full">
-      <!-- POSTAVY -->
       <div id="tab-content-characters" class="tab-content">
-        <div id="char-upload-admin-area" class="hidden">
+        <div id="char-upload-admin-area" class="hidden mb-6 p-4 bg-gray-900 border border-yellow-600/40 rounded-xl">
           <label class="block text-sm font-semibold text-yellow-400 mb-2">Nahrát JSON Script postav:</label>
           <input type="file" accept=".json" onchange="uploadCharactersScript(event)" class="text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-yellow-500 file:text-black hover:file:bg-yellow-400 cursor-pointer">
         </div>
         <div id="characters-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
       </div>
 
-      <!-- HISTORIE HER -->
       <div id="tab-content-games" class="tab-content hidden">
-        <div id="game-admin-btn-area" class="hidden">
-          <button onclick="openGameModal()" class="gold-bg text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition text-sm flex items-center gap-2">
-            <i class="fa-solid fa-plus"></i> Zapsat novou hru
-          </button>
+        <div id="game-admin-btn-area" class="hidden mb-6">
+          <button onclick="openGameModal()" class="gold-bg text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition text-sm flex items-center gap-2"><i class="fa-solid fa-plus"></i> Zapsat novou hru</button>
         </div>
         <h2 class="text-xl font-bold mb-4 magic-font">Historie odehraných her</h2>
         <div id="games-list"></div>
       </div>
 
-      <!-- STUDENTI / UČITELÉ -->
       <div id="tab-content-players" class="tab-content hidden">
-        <div id="admin-add-student-area" class="hidden">
-          <h3 class="text-lg font-bold text-yellow-400 magic-font mb-3">Registrovat nového uživatele (Student / Učitel)</h3>
+        <div id="admin-add-student-area" class="hidden mb-8 p-5 bg-gray-900 border border-yellow-600/40 rounded-xl">
+          <h3 class="text-lg font-bold text-yellow-400 magic-font mb-3">Registrovat studenta (po vytvoření v Auth)</h3>
           <form id="add-student-form" onsubmit="addStudent(event)" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <input type="text" id="student-name" placeholder="Celé jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
-            <input type="text" id="student-username" placeholder="Uživatelské jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <input type="email" id="student-email" placeholder="E-mail (stejný jako v Auth)" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
             <select id="student-role" class="bg-black border border-gray-700 rounded p-2 text-sm text-white">
               <option value="PLAYER">Student (Hráč)</option>
               <option value="ADMIN">Učitel (Admin / GM)</option>
@@ -985,26 +877,22 @@
               <option value="Ravenclaw">Havraspár</option>
               <option value="Hufflepuff">Mrzimor</option>
             </select>
-            <input type="url" id="student-stream" placeholder="Odkaz na stream (volitelné)" class="bg-black border border-gray-700 rounded p-2 text-sm text-white">
-            <button type="submit" class="gold-bg text-black font-bold py-2 rounded lg:col-span-3 hover:opacity-90 transition">Registrovat uživatele</button>
+            <input type="url" id="student-stream" placeholder="Odkaz na stream (volitelné)" class="bg-black border border-gray-700 rounded p-2 text-sm text-white lg:col-span-2">
+            <button type="submit" class="gold-bg text-black font-bold py-2 rounded lg:col-span-3 hover:opacity-90 transition">Propojit a uložit studenta</button>
           </form>
         </div>
         <h2 class="text-xl font-bold mb-4 magic-font">Seznam uživatelů a bodů</h2>
         <div id="players-list"></div>
       </div>
 
-      <!-- BODOVÁNÍ KOLEJÍ -->
       <div id="tab-content-leaderboard" class="tab-content hidden">
         <h2 class="text-xl font-bold mb-6 magic-font">Bodování kolejí</h2>
         <div id="house-points-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div>
       </div>
 
-      <!-- ANKETY -->
       <div id="tab-content-polls" class="tab-content hidden">
-        <div id="poll-admin-btn-area" class="hidden">
-          <button onclick="openPollModal()" class="gold-bg text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition text-sm flex items-center gap-2">
-            <i class="fa-solid fa-plus"></i> Vytvořit novou anketu
-          </button>
+        <div id="poll-admin-btn-area" class="hidden mb-6">
+          <button onclick="openPollModal()" class="gold-bg text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition text-sm flex items-center gap-2"><i class="fa-solid fa-plus"></i> Vytvořit novou anketu</button>
         </div>
         <h2 class="text-xl font-bold mb-4 magic-font">Aktivní hlasování</h2>
         <div id="polls-list"></div>
@@ -1029,8 +917,8 @@
           <input type="url" id="edit-user-stream" placeholder="https://twitch.tv/..." class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white">
         </div>
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
-          <button type="button" onclick="closeEditUserModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 text-sm">Zrušit</button>
-          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded hover:opacity-90 text-sm">Uložit změny</button>
+          <button type="button" onclick="closeEditUserModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded text-sm">Zrušit</button>
+          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded text-sm">Uložit změny</button>
         </div>
       </form>
     </div>
@@ -1045,23 +933,21 @@
       </div>
       <form id="add-poll-form" onsubmit="savePoll(event)" class="space-y-4">
         <div>
-          <label class="block text-xs text-gray-400 mb-1">Otázka ankety</label>
+          <label class="block text-xs text-gray-400 mb-1">Otázka</label>
           <input type="text" id="poll-title-input" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1">Max. počet hlasů na hráče</label>
+          <label class="block text-xs text-gray-400 mb-1">Max. hlasů na hráče</label>
           <input type="number" id="poll-max-votes" min="1" max="10" value="1" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-2">Možnosti (až 10)</label>
+          <label class="block text-xs text-gray-400 mb-2">Možnosti</label>
           <div id="poll-options-container" class="space-y-2"></div>
-          <button type="button" onclick="addPollOptionInput()" class="mt-3 text-xs text-yellow-400 hover:underline flex items-center gap-1">
-            <i class="fa-solid fa-plus"></i> Přidat možnost
-          </button>
+          <button type="button" onclick="addPollOptionInput()" class="mt-3 text-xs text-yellow-400 hover:underline"><i class="fa-solid fa-plus"></i> Přidat možnost</button>
         </div>
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
-          <button type="button" onclick="closePollModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 text-sm">Zrušit</button>
-          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded hover:opacity-90 text-sm">Uložit anketu</button>
+          <button type="button" onclick="closePollModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded text-sm">Zrušit</button>
+          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded text-sm">Uložit</button>
         </div>
       </form>
     </div>
@@ -1071,41 +957,37 @@
   <div id="game-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-gray-900 border border-yellow-600/40 p-6 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
       <div class="flex justify-between items-center mb-4">
-        <h3 id="game-modal-title" class="text-xl font-bold text-yellow-400 magic-font">Zapsat novou hru</h3>
+        <h3 id="game-modal-title" class="text-xl font-bold text-yellow-400 magic-font">Zapsat hru</h3>
         <button onclick="closeGameModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
       </div>
       <form id="add-game-form" onsubmit="saveGame(event)" class="space-y-4">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label class="block text-xs text-gray-400 mb-1">Název hry / scénáře</label>
+            <label class="block text-xs text-gray-400 mb-1">Název</label>
             <input type="text" id="game-title-input" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
           </div>
           <div>
             <label class="block text-xs text-gray-400 mb-1">Vítězná strana</label>
             <select id="game-winner-input" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white">
-              <option value="GOOD">Dobro (Měšťané)</option>
-              <option value="EVIL">Zlo (Démon)</option>
+              <option value="GOOD">Dobro</option>
+              <option value="EVIL">Zlo</option>
             </select>
           </div>
           <div>
-            <label class="block text-xs text-gray-400 mb-1">Nahrát JSON scénář (volitelné)</label>
-            <input type="file" accept=".json" onchange="handleGameScriptUpload(event)" class="w-full text-xs text-gray-400 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-yellow-500 file:text-black hover:file:bg-yellow-400 cursor-pointer">
+            <label class="block text-xs text-gray-400 mb-1">JSON Scénář</label>
+            <input type="file" accept=".json" onchange="handleGameScriptUpload(event)" class="w-full text-xs text-gray-400 file:bg-yellow-500 file:text-black rounded cursor-pointer">
           </div>
         </div>
-
-        <div class="pt-2">
+        <div>
           <div class="flex justify-between items-center mb-2">
-            <label class="text-sm font-semibold text-yellow-400">Hráči v této hře (až 20)</label>
-            <button type="button" onclick="addGamePlayerRow()" class="text-xs bg-gray-800 hover:bg-gray-700 text-yellow-400 px-3 py-1.5 rounded flex items-center gap-1">
-              <i class="fa-solid fa-user-plus"></i> Přidat studenta
-            </button>
+            <label class="text-sm font-semibold text-yellow-400">Hráči</label>
+            <button type="button" onclick="addGamePlayerRow()" class="text-xs bg-gray-800 text-yellow-400 px-3 py-1.5 rounded"><i class="fa-solid fa-user-plus"></i> Přidat</button>
           </div>
           <div id="modal-game-players-container" class="max-h-60 overflow-y-auto pr-1"></div>
         </div>
-
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
-          <button type="button" onclick="closeGameModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 text-sm">Zrušit</button>
-          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded hover:opacity-90 text-sm">Uložit hru</button>
+          <button type="button" onclick="closeGameModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded text-sm">Zrušit</button>
+          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded text-sm">Uložit hru</button>
         </div>
       </form>
     </div>
