@@ -20,9 +20,8 @@
     const SUPABASE_ANON_KEY = "sb_publishable_to3lCwqIAYz3vQgq0gVK-w_Y4nLAbTN"; 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // BEZPEČNÉ: Žádná hesla ani admin účty již nejsou zapsány v JS kódu!
     const defaultUsers = [
-      { id: 1, username: 'MrAgnl', password: 'CoTeToZajima69.', name: 'MrAgnl', role: 'ADMIN', house: 'Hufflepuff', points: 0, stream: '' },
-      { id: 2, username: 'hrac', password: 'bradavice', name: 'Student Bradavic', role: 'PLAYER', house: 'Gryffindor', points: 0, stream: '' },
       { id: 3, username: 'divak', password: 'bradavice', name: 'Divák zvenčí', role: 'SPECTATOR', house: 'None', points: 0, stream: '' }
     ];
 
