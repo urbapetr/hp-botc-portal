@@ -20,12 +20,12 @@
     const SUPABASE_ANON_KEY = "sb_publishable_to3lCwqIAYz3vQgq0gVK-w_Y4nLAbTN"; 
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // BEZPEČNÉ: Žádná hesla ani admin účty již nejsou zapsány v JS kódu!
+    // Výchozí anonymní účet diváka pro rychlý přístup
     const defaultUsers = [
       { id: 3, username: 'divak', password: 'bradavice', name: 'Divák zvenčí', role: 'SPECTATOR', house: 'None', points: 0, stream: '' }
     ];
 
-    const defaultHousePoints = { Gryffindor: 150, Slytherin: 120, Ravenclaw: 140, Hufflepuff: 110 };
+    const defaultHousePoints = { Gryffindor: 0, Slytherin: 0, Ravenclaw: 0, Hufflepuff: 0 };
 
     let currentUser = null;
     let users = defaultUsers;
@@ -105,64 +105,82 @@
       document.getElementById('login-password').value = p;
     }
 
-async function handleLogin(e) {
-  if (e) e.preventDefault();
-  const inputEmail = document.getElementById('login-username').value.trim();
-  const inputPass = document.getElementById('login-password').value.trim();
+    async function handleLogin(e) {
+      if (e) e.preventDefault();
+      const inputEmail = document.getElementById('login-username').value.trim();
+      const inputPass = document.getElementById('login-password').value.trim();
 
-  // 1. Ověření přihlášení přes oficiální Supabase Auth
-  const { data, error } = await supabaseClient.auth.signInWithPassword({
-    email: inputEmail,
-    password: inputPass
-  });
+      // Speciální volba pro anonymního diváka
+      if (inputEmail.toLowerCase() === 'divak' && inputPass === 'bradavice') {
+        let spectatorUser = users.find(u => u.role === 'SPECTATOR');
+        if (!spectatorUser) {
+          spectatorUser = defaultUsers[0];
+        }
+        currentUser = spectatorUser;
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('app-screen').classList.remove('hidden');
+        document.getElementById('user-display-name').textContent = currentUser.name;
+        document.getElementById('user-display-role').textContent = 'Divák';
+        renderCurrentTab();
+        return;
+      }
 
-  if (error) {
-    alert('Neplatné přihlašovací údaje nebo chyba: ' + error.message);
-    return;
-  }
+      // 1. Ověření přihlášení přes oficiální Supabase Auth
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email: inputEmail,
+        password: inputPass
+      });
 
-  // 2. Pokud je přihlášení úspěšné, získáme ID přihlášeného uživatele ze Supabase
-  const authUser = data.user;
+      if (error) {
+        alert('Neplatné přihlašovací údaje nebo chyba: ' + error.message);
+        return;
+      }
 
-  // 3. Najdeme uživatele v našem poli `users` (načteném z databázového JSONu) podle e-mailu nebo jména
-  let found = users.find(u => 
-    (u.username && u.username.toLowerCase() === inputEmail.toLowerCase()) || 
-    (u.email && u.email.toLowerCase() === inputEmail.toLowerCase())
-  );
+      // 2. ID přihlášeného uživatele ze Supabase Auth
+      const authUser = data.user;
 
-  // Pokud se přihlásil hlavní administrátor (a ještě ho nemáš explicitně v JSON poli uživatelů), vytvoříme ho
-  if (!found && inputEmail.toLowerCase() === 'mragnl@bradavice.cz') {
-    found = { 
-      id: authUser.id, 
-      username: inputEmail, 
-      name: 'MrAgnl', 
-      role: 'ADMIN', 
-      house: 'Hufflepuff', 
-      points: 0, 
-      stream: '' 
-    };
-    users.push(found);
-    await saveState();
-  }
+      // 3. Najdeme profil uživatele podle e-mailu nebo ID
+      let found = users.find(u => 
+        (u.email && u.email.toLowerCase() === inputEmail.toLowerCase()) || 
+        (u.username && u.username.toLowerCase() === inputEmail.toLowerCase()) ||
+        (u.id === authUser.id)
+      );
 
-  if (found) {
-    currentUser = found;
-    document.getElementById('login-screen').classList.add('hidden');
-    document.getElementById('app-screen').classList.remove('hidden');
-    document.getElementById('user-display-name').textContent = currentUser.name;
-    
-    let roleName = 'Hráč';
-    if (currentUser.role === 'ADMIN') roleName = 'Učitel (Admin / GM)';
-    if (currentUser.role === 'SPECTATOR') roleName = 'Divák';
-    document.getElementById('user-display-role').textContent = roleName;
+      // Pokud se přihlásil hlavní administrátor a ještě nemá profil v JSONu uživatelů, automaticky ho vytvoříme
+      if (!found && inputEmail.toLowerCase() === 'minecraftpetr2001@gmail.com') {
+        found = { 
+          id: authUser.id, 
+          email: inputEmail,
+          username: 'MrAgnl', 
+          name: 'MrAgnl', 
+          role: 'ADMIN', 
+          house: 'Hufflepuff', 
+          points: 0, 
+          stream: '' 
+        };
+        users.push(found);
+        await saveState();
+      }
 
-    renderCurrentTab();
-  } else {
-    alert('Přihlášení v Supabase Auth proběhlo úspěšně, ale uživatel nemá v aplikaci nastavenou roli!');
-  }
-}
+      if (found) {
+        currentUser = found;
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('app-screen').classList.remove('hidden');
+        document.getElementById('user-display-name').textContent = currentUser.name;
+        
+        let roleName = 'Hráč';
+        if (currentUser.role === 'ADMIN') roleName = 'Učitel (Admin / GM)';
+        if (currentUser.role === 'SPECTATOR') roleName = 'Divák';
+        document.getElementById('user-display-role').textContent = roleName;
+
+        renderCurrentTab();
+      } else {
+        alert('Přihlášení proběhlo úspěšně, ale uživatel nemá nastavenou roli v aplikaci.');
+      }
+    }
 
     function logout() {
+      supabaseClient.auth.signOut();
       currentUser = null;
       document.getElementById('app-screen').classList.add('hidden');
       document.getElementById('login-screen').classList.remove('hidden');
@@ -652,12 +670,11 @@ async function handleLogin(e) {
       if (!currentUser || currentUser.role !== 'ADMIN') return;
       const name = document.getElementById('student-name').value.trim();
       const username = document.getElementById('student-username').value.trim();
-      const pass = document.getElementById('student-pass').value.trim();
       const role = document.getElementById('student-role').value;
       const house = document.getElementById('student-house').value;
       const stream = document.getElementById('student-stream').value.trim();
 
-      if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+      if (users.some(u => u.username && u.username.toLowerCase() === username.toLowerCase())) {
         alert('Uživatel s tímto jménem již existuje!');
         return;
       }
@@ -665,7 +682,6 @@ async function handleLogin(e) {
       users.push({ 
         id: Date.now(), 
         username, 
-        password: pass, 
         name, 
         role, 
         house, 
@@ -683,7 +699,6 @@ async function handleLogin(e) {
       const user = users.find(u => u.id === userId);
       if (user) {
         document.getElementById('edit-user-name').value = user.name;
-        document.getElementById('edit-user-pass').value = user.password;
         document.getElementById('edit-user-stream').value = user.stream || '';
         document.getElementById('edit-user-modal').classList.remove('hidden');
       }
@@ -701,7 +716,6 @@ async function handleLogin(e) {
       const user = users.find(u => u.id === editingUserId);
       if (user) {
         user.name = document.getElementById('edit-user-name').value.trim();
-        user.password = document.getElementById('edit-user-pass').value.trim();
         user.stream = document.getElementById('edit-user-stream').value.trim();
         
         await saveState();
@@ -898,8 +912,8 @@ async function handleLogin(e) {
       <h1 class="text-2xl font-bold text-center mb-6 gold-text magic-font">Bradavický Portál</h1>
       <form onsubmit="handleLogin(event)" class="space-y-4">
         <div>
-          <label class="block text-sm text-gray-400 mb-1">Uživatelské jméno</label>
-          <input type="text" id="login-username" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 focus:outline-none" required>
+          <label class="block text-sm text-gray-400 mb-1">E-mail / Uživatelské jméno</label>
+          <input type="text" id="login-username" placeholder="minecraftpetr2001@gmail.com" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-yellow-500 focus:outline-none" required>
         </div>
         <div>
           <label class="block text-sm text-gray-400 mb-1">Heslo</label>
@@ -960,8 +974,7 @@ async function handleLogin(e) {
           <h3 class="text-lg font-bold text-yellow-400 magic-font mb-3">Registrovat nového uživatele (Student / Učitel)</h3>
           <form id="add-student-form" onsubmit="addStudent(event)" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <input type="text" id="student-name" placeholder="Celé jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
-            <input type="text" id="student-username" placeholder="Přihlašovací jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
-            <input type="text" id="student-pass" placeholder="Heslo" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
+            <input type="text" id="student-username" placeholder="Uživatelské jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
             <select id="student-role" class="bg-black border border-gray-700 rounded p-2 text-sm text-white">
               <option value="PLAYER">Student (Hráč)</option>
               <option value="ADMIN">Učitel (Admin / GM)</option>
@@ -1010,10 +1023,6 @@ async function handleLogin(e) {
         <div>
           <label class="block text-xs text-gray-400 mb-1">Celé jméno</label>
           <input type="text" id="edit-user-name" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">Heslo</label>
-          <input type="text" id="edit-user-pass" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1">Odkaz na stream</label>
