@@ -21,9 +21,9 @@
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const defaultUsers = [
-      { id: 1, username: 'MrAgnl', password: 'CoTeToZajima69.', name: 'MrAgnl', role: 'ADMIN', house: 'Hufflepuff', points: 0 },
-      { id: 2, username: 'hrac', password: 'bradavice', name: 'Student Bradavic', role: 'PLAYER', house: 'Gryffindor', points: 0 },
-      { id: 3, username: 'divak', password: 'bradavice', name: 'Divák zvenčí', role: 'SPECTATOR', house: 'None', points: 0 }
+      { id: 1, username: 'MrAgnl', password: 'CoTeToZajima69.', name: 'MrAgnl', role: 'ADMIN', house: 'Hufflepuff', points: 0, stream: '' },
+      { id: 2, username: 'hrac', password: 'bradavice', name: 'Student Bradavic', role: 'PLAYER', house: 'Gryffindor', points: 0, stream: '' },
+      { id: 3, username: 'divak', password: 'bradavice', name: 'Divák zvenčí', role: 'SPECTATOR', house: 'None', points: 0, stream: '' }
     ];
 
     const defaultHousePoints = { Gryffindor: 150, Slytherin: 120, Ravenclaw: 140, Hufflepuff: 110 };
@@ -41,6 +41,7 @@
 
     let editingGameId = null;
     let editingPollId = null;
+    let editingUserId = null;
 
     async function loadStateFromCloud() {
       try {
@@ -58,7 +59,10 @@
         if (data && data.payload) {
           const p = data.payload;
           users = p.users && p.users.length > 0 ? p.users : defaultUsers;
-          users.forEach(u => { if (u.points === undefined) u.points = 0; });
+          users.forEach(u => { 
+            if (u.points === undefined) u.points = 0; 
+            if (u.stream === undefined) u.stream = '';
+          });
           
           characters = (p.characters || []).map(c => ({
             ...c,
@@ -617,6 +621,7 @@
       const pass = document.getElementById('student-pass').value.trim();
       const role = document.getElementById('student-role').value;
       const house = document.getElementById('student-house').value;
+      const stream = document.getElementById('student-stream').value.trim();
 
       if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
         alert('Uživatel s tímto jménem již existuje!');
@@ -630,11 +635,45 @@
         name, 
         role, 
         house, 
-        points: 0 
+        points: 0,
+        stream 
       });
       await saveState();
       document.getElementById('add-student-form').reset();
       renderPlayers();
+    }
+
+    function openEditUserModal(userId) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      editingUserId = userId;
+      const user = users.find(u => u.id === userId);
+      if (user) {
+        document.getElementById('edit-user-name').value = user.name;
+        document.getElementById('edit-user-pass').value = user.password;
+        document.getElementById('edit-user-stream').value = user.stream || '';
+        document.getElementById('edit-user-modal').classList.remove('hidden');
+      }
+    }
+
+    function closeEditUserModal() {
+      document.getElementById('edit-user-modal').classList.add('hidden');
+      editingUserId = null;
+    }
+
+    async function saveEditedUser(e) {
+      e.preventDefault();
+      if (!currentUser || currentUser.role !== 'ADMIN' || !editingUserId) return;
+      
+      const user = users.find(u => u.id === editingUserId);
+      if (user) {
+        user.name = document.getElementById('edit-user-name').value.trim();
+        user.password = document.getElementById('edit-user-pass').value.trim();
+        user.stream = document.getElementById('edit-user-stream').value.trim();
+        
+        await saveState();
+        closeEditUserModal();
+        renderPlayers();
+      }
     }
 
     async function updateStudentPoints(userId, delta) {
@@ -692,9 +731,15 @@
             <tbody class="divide-y divide-gray-800">
               ${displayUsers.map(p => {
                 const houseInfo = houseDisplayMap[p.house] || houseDisplayMap['None'];
+                const hasStream = p.stream && p.stream.trim() !== '';
+                
+                const nameHtml = hasStream 
+                  ? `<a href="${p.stream}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-semibold flex items-center gap-1.5" title="Otevřít stream"><i class="fa-solid fa-video text-xs"></i> ${p.name}</a>`
+                  : `<span class="font-semibold text-white">${p.name}</span>`;
+
                 return `
                   <tr class="hover:bg-gray-900/50">
-                    <td class="p-3 font-semibold text-white">${p.name}</td>
+                    <td class="p-3">${nameHtml}</td>
                     <td class="p-3"><span class="px-2.5 py-0.5 rounded text-xs font-bold ${p.role === 'ADMIN' ? 'bg-yellow-950 text-yellow-400 border border-yellow-700' : 'bg-gray-800 text-blue-400'}">${p.role === 'ADMIN' ? 'Učitel (Admin)' : 'Student'}</span></td>
                     <td class="p-3"><span class="px-2.5 py-1 rounded-full text-xs font-bold ${houseInfo.class}">${houseInfo.name}</span></td>
                     <td class="p-3 font-extrabold text-white">${p.role === 'PLAYER' ? `${p.points || 0} b` : '<span class="text-gray-500 font-normal">-</span>'}</td>
@@ -706,6 +751,7 @@
                             <button onclick="updateStudentPoints(${p.id}, -5)" class="px-2 py-0.5 bg-gray-800 hover:bg-red-900 text-red-400 rounded font-bold" title="Odebrat 5 bodů">-5</button>
                           </div>
                         ` : ''}
+                        <button onclick="openEditUserModal(${p.id})" class="text-yellow-400 hover:text-yellow-300 text-xs p-1" title="Upravit uživatele"><i class="fa-solid fa-pen"></i></button>
                         <button onclick="deleteStudent(${p.id})" class="text-red-400 hover:text-red-300 text-xs p-1" title="Smazat uživatele"><i class="fa-solid fa-trash"></i></button>
                       </td>
                     ` : ''}
@@ -878,7 +924,7 @@
       <div id="tab-content-players" class="tab-content hidden">
         <div id="admin-add-student-area" class="hidden">
           <h3 class="text-lg font-bold text-yellow-400 magic-font mb-3">Registrovat nového uživatele (Student / Učitel)</h3>
-          <form id="add-student-form" onsubmit="addStudent(event)" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <form id="add-student-form" onsubmit="addStudent(event)" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <input type="text" id="student-name" placeholder="Celé jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
             <input type="text" id="student-username" placeholder="Přihlašovací jméno" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
             <input type="text" id="student-pass" placeholder="Heslo" class="bg-black border border-gray-700 rounded p-2 text-sm text-white" required>
@@ -892,7 +938,8 @@
               <option value="Ravenclaw">Havraspár</option>
               <option value="Hufflepuff">Mrzimor</option>
             </select>
-            <button type="submit" class="gold-bg text-black font-bold py-2 rounded lg:col-span-5 hover:opacity-90 transition">Registrovat uživatele</button>
+            <input type="url" id="student-stream" placeholder="Odkaz na stream (volitelné)" class="bg-black border border-gray-700 rounded p-2 text-sm text-white">
+            <button type="submit" class="gold-bg text-black font-bold py-2 rounded lg:col-span-3 hover:opacity-90 transition">Registrovat uživatele</button>
           </form>
         </div>
         <h2 class="text-xl font-bold mb-4 magic-font">Seznam uživatelů a bodů</h2>
@@ -916,6 +963,34 @@
         <div id="polls-list"></div>
       </div>
     </main>
+  </div>
+
+  <!-- MODAL: UPRAVIT UŽIVATELE -->
+  <div id="edit-user-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-gray-900 border border-yellow-600/40 p-6 rounded-2xl max-w-md w-full">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-xl font-bold text-yellow-400 magic-font">Upravit uživatele</h3>
+        <button onclick="closeEditUserModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+      <form onsubmit="saveEditedUser(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Celé jméno</label>
+          <input type="text" id="edit-user-name" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Heslo</label>
+          <input type="text" id="edit-user-pass" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Odkaz na stream</label>
+          <input type="url" id="edit-user-stream" placeholder="https://twitch.tv/..." class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white">
+        </div>
+        <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
+          <button type="button" onclick="closeEditUserModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded hover:bg-gray-700 text-sm">Zrušit</button>
+          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded hover:opacity-90 text-sm">Uložit změny</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- MODAL: ANKETY -->
