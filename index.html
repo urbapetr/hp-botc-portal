@@ -59,7 +59,13 @@
           const p = data.payload;
           users = p.users && p.users.length > 0 ? p.users : defaultUsers;
           users.forEach(u => { if (u.points === undefined) u.points = 0; });
-          characters = p.characters || [];
+          
+          characters = (p.characters || []).map(c => ({
+            ...c,
+            onScript: c.onScript !== undefined ? c.onScript : true,
+            visible: c.visible !== undefined ? c.visible : true
+          }));
+
           games = p.games || [];
           polls = p.polls || [];
           housePoints = p.housePoints || defaultHousePoints;
@@ -397,7 +403,7 @@
         try {
           const json = JSON.parse(evt.target.result);
           if (Array.isArray(json)) {
-            tempGameCharacters = json.filter(item => item && item.name).map(item => ({
+            tempGameCharacters = json.filter(item => item && item.name && item.team && item.team !== 'meta').map(item => ({
               name: item.name,
               team: item.team || 'townsfolk'
             }));
@@ -722,13 +728,15 @@
         try {
           const json = JSON.parse(evt.target.result);
           if (Array.isArray(json)) {
-            characters = json.filter(item => item && item.name).map(item => ({
+            const validItems = json.filter(item => item && item.name && item.team && item.team !== 'meta');
+            characters = validItems.map(item => ({
               id: item.id || Math.random().toString(36).substring(7),
               name: item.name,
               team: item.team || 'townsfolk',
               ability: item.ability || '',
               image: Array.isArray(item.image) ? item.image[0] : (item.image || ''),
-              onScript: true
+              onScript: true,
+              visible: true
             }));
             await saveState();
             renderCharacters();
@@ -741,6 +749,16 @@
       reader.readAsText(file);
     }
 
+    async function toggleCharacterProp(charId, prop) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      const char = characters.find(c => c.id === charId);
+      if (char) {
+        char[prop] = !char[prop];
+        await saveState();
+        renderCharacters();
+      }
+    }
+
     function renderCharacters() {
       const container = document.getElementById('characters-container');
       const isAdmin = currentUser && currentUser.role === 'ADMIN';
@@ -749,23 +767,44 @@
         uploadArea.className = isAdmin ? 'mb-6 p-4 bg-gray-900 border border-yellow-600/40 rounded-xl' : 'hidden';
       }
 
-      if (characters.length === 0) {
-        container.innerHTML = `<div class="col-span-full text-center text-gray-500 py-12">Žádné postavy nebyly nahrány.</div>`;
+      let displayCharacters = characters;
+      if (!isAdmin) {
+        displayCharacters = characters.filter(c => c.visible !== false);
+      }
+
+      if (displayCharacters.length === 0) {
+        container.innerHTML = `<div class="col-span-full text-center text-gray-500 py-12">Žádné postavy nejsou k dispozici.</div>`;
         return;
       }
 
-      container.innerHTML = characters.map(c => `
-        <div class="border border-gray-800 bg-gray-900/40 rounded-xl p-5 shadow-lg relative flex flex-col justify-between">
+      container.innerHTML = displayCharacters.map(c => `
+        <div class="border ${c.onScript === false ? 'border-gray-800/50 opacity-60 bg-gray-950/20' : 'border-gray-800 bg-gray-900/40'} rounded-xl p-5 shadow-lg relative flex flex-col justify-between">
           <div>
             <div class="flex items-center space-x-4 mb-3">
               ${c.image ? `<img src="${c.image}" class="w-14 h-14 object-contain rounded-full border border-yellow-500/30 bg-black/40 p-1">` : `<div class="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center text-yellow-500 magic-font text-xl font-bold">${c.name.charAt(0)}</div>`}
               <div>
                 <h3 class="font-bold text-lg text-white magic-font">${c.name}</h3>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full border border-gray-700 bg-gray-800 text-yellow-400 uppercase tracking-wider">${c.team}</span>
+                <div class="flex flex-wrap gap-1 mt-1">
+                  <span class="text-xs font-semibold px-2 py-0.5 rounded-full border border-gray-700 bg-gray-800 text-yellow-400 uppercase tracking-wider">${c.team}</span>
+                  ${c.onScript === false ? '<span class="text-[10px] px-1.5 py-0.5 bg-red-950 text-red-400 border border-red-800 rounded">Mimo script</span>' : ''}
+                  ${c.visible === false ? '<span class="text-[10px] px-1.5 py-0.5 bg-gray-800 text-gray-400 border border-gray-700 rounded">Skryto</span>' : ''}
+                </div>
               </div>
             </div>
             <p class="text-sm text-gray-300 mb-4 leading-relaxed">${c.ability || 'Bez popisu.'}</p>
           </div>
+          ${isAdmin ? `
+            <div class="border-t border-gray-800 pt-3 mt-2 flex justify-between items-center text-xs">
+              <label class="flex items-center gap-1.5 cursor-pointer text-gray-300 hover:text-white">
+                <input type="checkbox" ${c.onScript !== false ? 'checked' : ''} onchange="toggleCharacterProp('${c.id}', 'onScript')" class="rounded bg-black border-gray-700 text-yellow-500 focus:ring-0">
+                <span>Na scriptu</span>
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer text-gray-300 hover:text-white">
+                <input type="checkbox" ${c.visible !== false ? 'checked' : ''} onchange="toggleCharacterProp('${c.id}', 'visible')" class="rounded bg-black border-gray-700 text-yellow-500 focus:ring-0">
+                <span>Viditelné pro studenty</span>
+              </label>
+            </div>
+          ` : ''}
         </div>
       `).join('');
     }
@@ -789,8 +828,6 @@
         <button type="submit" class="w-full gold-bg text-black font-bold py-3 rounded-lg hover:opacity-95 transition magic-font">Vstoupit do portálu</button>
       </form>
       <div class="mt-6 flex flex-wrap justify-center gap-3 text-sm">
-        <button onclick="fillLogin('MrAgnl', 'CoTeToZajima69.')" class="text-yellow-500 hover:underline">GM login</button>
-        <button onclick="fillLogin('hrac', 'bradavice')" class="text-blue-400 hover:underline">Hráč login</button>
         <button onclick="fillLogin('divak', 'bradavice')" class="text-purple-400 hover:underline">Divák login</button>
       </div>
     </div>
