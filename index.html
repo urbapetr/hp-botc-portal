@@ -32,7 +32,8 @@
     let games = [];
     let polls = [];
     let housePoints = defaultHousePoints;
-    let maxHousePoints = 100; // Výchozí max bodů pro kampaň
+    let houseUpgrades = { Gryffindor: [], Slytherin: [], Ravenclaw: [], Hufflepuff: [] };
+    let maxHousePoints = 100;
     let activeTab = 'characters';
 
     let tempGamePlayers = [];
@@ -41,6 +42,8 @@
     let editingGameId = null;
     let editingPollId = null;
     let editingUserId = null;
+    let targetUpgradeHouse = null;
+    let editingUpgradeId = null;
 
     async function loadStateFromCloud() {
       try {
@@ -72,6 +75,7 @@
           games = p.games || [];
           polls = p.polls || [];
           housePoints = p.housePoints || defaultHousePoints;
+          houseUpgrades = p.houseUpgrades || { Gryffindor: [], Slytherin: [], Ravenclaw: [], Hufflepuff: [] };
           if (p.maxHousePoints !== undefined) maxHousePoints = p.maxHousePoints;
         }
       } catch (err) {
@@ -80,7 +84,7 @@
     }
 
     async function saveState() {
-      const payloadData = { users, characters, games, polls, housePoints, maxHousePoints };
+      const payloadData = { users, characters, games, polls, housePoints, houseUpgrades, maxHousePoints };
       try {
         const { error } = await supabaseClient
           .from('app_data')
@@ -537,7 +541,7 @@
       `).join('');
     }
 
-    // --- BODOVÁNÍ KOLEJÍ ---
+    // --- BODOVÁNÍ KOLEJÍ & VYLEPŠENÍ ---
     async function updateHousePoints(house, delta) {
       if (!currentUser || currentUser.role !== 'ADMIN') return;
       if (!housePoints[house]) housePoints[house] = 0;
@@ -567,6 +571,75 @@
       alert('Max bodů uloženo.');
     }
 
+    function openUpgradeModal(house, upgradeId = null) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      targetUpgradeHouse = house;
+      editingUpgradeId = upgradeId;
+
+      const modalTitle = document.getElementById('upgrade-modal-title');
+      if (upgradeId) {
+        modalTitle.textContent = 'Upravit vylepšení';
+        const upgrade = (houseUpgrades[house] || []).find(u => u.id === upgradeId);
+        if (upgrade) {
+          document.getElementById('upgrade-title').value = upgrade.title;
+          document.getElementById('upgrade-desc').value = upgrade.desc;
+          document.getElementById('upgrade-visible').checked = upgrade.visible !== false;
+        }
+      } else {
+        modalTitle.textContent = 'Nové vylepšení pro kolej';
+        document.getElementById('add-upgrade-form').reset();
+        document.getElementById('upgrade-visible').checked = true;
+      }
+      document.getElementById('upgrade-modal').classList.remove('hidden');
+    }
+
+    function closeUpgradeModal() {
+      document.getElementById('upgrade-modal').classList.add('hidden');
+      document.getElementById('add-upgrade-form').reset();
+      targetUpgradeHouse = null;
+      editingUpgradeId = null;
+    }
+
+    async function saveUpgrade(e) {
+      e.preventDefault();
+      if (!currentUser || currentUser.role !== 'ADMIN' || !targetUpgradeHouse) return;
+
+      const title = document.getElementById('upgrade-title').value.trim();
+      const desc = document.getElementById('upgrade-desc').value.trim();
+      const visible = document.getElementById('upgrade-visible').checked;
+
+      if (!houseUpgrades[targetUpgradeHouse]) houseUpgrades[targetUpgradeHouse] = [];
+
+      if (editingUpgradeId) {
+        const upgrade = houseUpgrades[targetUpgradeHouse].find(u => u.id === editingUpgradeId);
+        if (upgrade) {
+          upgrade.title = title;
+          upgrade.desc = desc;
+          upgrade.visible = visible;
+        }
+      } else {
+        houseUpgrades[targetUpgradeHouse].unshift({
+          id: 'upg_' + Date.now(),
+          title,
+          desc,
+          visible
+        });
+      }
+
+      await saveState();
+      closeUpgradeModal();
+      renderLeaderboard();
+    }
+
+    async function deleteUpgrade(house, upgradeId) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      if (confirm('Smazat toto vylepšení?')) {
+        houseUpgrades[house] = houseUpgrades[house].filter(u => u.id !== upgradeId);
+        await saveState();
+        renderLeaderboard();
+      }
+    }
+
     function renderLeaderboard() {
       const container = document.getElementById('house-points-container');
       const adminConfigArea = document.getElementById('admin-max-points-area');
@@ -588,34 +661,59 @@
         const meta = housesMeta[key];
         const points = housePoints[key] || 0;
         
-        // Výpočet procenta naplnění (0% až 100%)
         let percent = maxHousePoints > 0 ? (points / maxHousePoints) * 100 : 0;
         if (percent < 0) percent = 0;
         if (percent > 100) percent = 100;
 
-        // Dynamické pozadí: zespodu naplněno sytou barvou koleje, nahoře černé (#0b0c10)
         const bgStyle = `background: linear-gradient(to top, rgba(${meta.rgb}, 0.65) ${percent}%, #0b0c10 ${percent}%);`;
 
+        // Získání vylepšení pro tuto kolej
+        const allUpgrades = houseUpgrades[key] || [];
+        const visibleUpgrades = isAdmin ? allUpgrades : allUpgrades.filter(u => u.visible !== false);
+
         return `
-          <div class="border ${meta.borderColor} rounded-2xl p-6 flex flex-col justify-between shadow-xl relative overflow-hidden" style="${bgStyle}">
-            <div>
-              <div class="flex items-center justify-between mb-4">
-                <h3 class="text-2xl font-bold magic-font ${meta.textColor}">${meta.name}</h3>
-                <i class="fa-solid ${meta.icon} text-2xl ${meta.textColor}"></i>
+          <div class="flex flex-col gap-4">
+            <!-- Hlavní karta koleje -->
+            <div class="border ${meta.borderColor} rounded-2xl p-6 flex flex-col justify-between shadow-xl relative overflow-hidden" style="${bgStyle}">
+              <div>
+                <div class="flex items-center justify-between mb-4">
+                  <h3 class="text-2xl font-bold magic-font ${meta.textColor}">${meta.name}</h3>
+                  <div class="flex items-center gap-2">
+                    ${isAdmin ? `<button onclick="openUpgradeModal('${key}')" class="w-8 h-8 rounded-full bg-black/60 border ${meta.borderColor} ${meta.textColor} flex items-center justify-center hover:bg-black transition" title="Přidat vylepšení"><i class="fa-solid fa-plus text-xs"></i></button>` : ''}
+                    <i class="fa-solid ${meta.icon} text-2xl ${meta.textColor}"></i>
+                  </div>
+                </div>
+                <div class="text-4xl font-extrabold text-white mb-2 magic-font flex items-baseline gap-2">
+                  ${points} <span class="text-sm text-gray-400">bodů</span>
+                </div>
+                ${isAdmin ? `<button onclick="setHousePointsDirect('${key}')" class="text-xs text-yellow-400 hover:underline mb-4 inline-block"><i class="fa-solid fa-pen"></i> Přepsat ručně</button>` : '<div class="mb-4"></div>'}
               </div>
-              <div class="text-4xl font-extrabold text-white mb-2 magic-font flex items-baseline gap-2">
-                ${points} <span class="text-sm text-gray-400">bodů</span>
-              </div>
-              ${isAdmin ? `<button onclick="setHousePointsDirect('${key}')" class="text-xs text-yellow-400 hover:underline mb-4 inline-block"><i class="fa-solid fa-pen"></i> Přepsat ručně</button>` : '<div class="mb-4"></div>'}
+              ${isAdmin ? `
+                <div class="border-t border-gray-800/80 pt-4 grid grid-cols-4 gap-2 text-xs font-bold bg-black/40 p-2 rounded-lg">
+                  <button onclick="updateHousePoints('${key}', -10)" class="bg-gray-800 hover:bg-red-900 text-red-400 py-2 rounded">-10</button>
+                  <button onclick="updateHousePoints('${key}', -50)" class="bg-gray-800 hover:bg-red-900 text-red-400 py-2 rounded">-50</button>
+                  <button onclick="updateHousePoints('${key}', 10)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+10</button>
+                  <button onclick="updateHousePoints('${key}', 50)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+50</button>
+                </div>
+              ` : ''}
             </div>
-            ${isAdmin ? `
-              <div class="border-t border-gray-800/80 pt-4 grid grid-cols-4 gap-2 text-xs font-bold bg-black/40 p-2 rounded-lg">
-                <button onclick="updateHousePoints('${key}', -10)" class="bg-gray-800 hover:bg-red-900 text-red-400 py-2 rounded">-10</button>
-                <button onclick="updateHousePoints('${key}', -50)" class="bg-gray-800 hover:bg-red-900 text-red-400 py-2 rounded">-50</button>
-                <button onclick="updateHousePoints('${key}', 10)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+10</button>
-                <button onclick="updateHousePoints('${key}', 50)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+50</button>
-              </div>
-            ` : ''}
+
+            <!-- Karty vylepšení pod kolejí -->
+            <div class="space-y-3">
+              ${visibleUpgrades.map(u => `
+                <div class="border ${meta.borderColor} bg-black/50 rounded-xl p-4 shadow-md relative ${u.visible === false ? 'opacity-60 border-dashed' : ''}">
+                  ${isAdmin ? `
+                    <div class="absolute top-3 right-3 flex gap-2">
+                      ${u.visible === false ? '<span class="text-[10px] bg-red-950 text-red-400 border border-red-800 px-1.5 py-0.5 rounded">Skryto</span>' : ''}
+                      <button onclick="openUpgradeModal('${key}', '${u.id}')" class="text-yellow-400 hover:text-yellow-300 text-xs"><i class="fa-solid fa-pen"></i></button>
+                      <button onclick="deleteUpgrade('${key}', '${u.id}')" class="text-red-400 hover:text-red-300 text-xs"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                  ` : ''}
+                  <h4 class="font-bold text-sm ${meta.textColor} magic-font mb-1">${u.title}</h4>
+                  <p class="text-xs text-gray-300 leading-relaxed">${u.desc}</p>
+                </div>
+              `).join('')}
+            </div>
           </div>
         `;
       }).join('');
@@ -966,6 +1064,34 @@
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
           <button type="button" onclick="closeEditUserModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded text-sm">Zrušit</button>
           <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded text-sm">Uložit změny</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: PŘIDAT/UPRAVIT VYLEPŠENÍ -->
+  <div id="upgrade-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-gray-900 border border-yellow-600/40 p-6 rounded-2xl max-w-md w-full">
+      <div class="flex justify-between items-center mb-4">
+        <h3 id="upgrade-modal-title" class="text-xl font-bold text-yellow-400 magic-font">Nové vylepšení</h3>
+        <button onclick="closeUpgradeModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+      <form id="add-upgrade-form" onsubmit="saveUpgrade(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Název vylepšení</label>
+          <input type="text" id="upgrade-title" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Podrobný popis</label>
+          <textarea id="upgrade-desc" rows="3" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required></textarea>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="checkbox" id="upgrade-visible" class="w-4 h-4 rounded bg-black border-gray-700 text-yellow-500 focus:ring-0">
+          <label for="upgrade-visible" class="text-sm text-gray-300">Zviditelnit hráčům (odškrtnutím skryješ)</label>
+        </div>
+        <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
+          <button type="button" onclick="closeUpgradeModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded text-sm">Zrušit</button>
+          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded text-sm">Uložit vylepšení</button>
         </div>
       </form>
     </div>
