@@ -65,18 +65,39 @@
             if (u.points === undefined) u.points = 0; 
             if (u.stream === undefined) u.stream = '';
           });
-          
-          characters = (p.characters || []).map(c => ({
-            ...c,
-            onScript: c.onScript !== undefined ? c.onScript : true,
-            visible: c.visible !== undefined ? c.visible : true
-          }));
 
           games = p.games || [];
           polls = p.polls || [];
           housePoints = p.housePoints || defaultHousePoints;
-          houseUpgrades = p.houseUpgrades || { Gryffindor: [], Slytherin: [], Ravenclaw: [], Hufflepuff: [] };
           if (p.maxHousePoints !== undefined) maxHousePoints = p.maxHousePoints;
+
+          // Uložení kompletních dat z cloudu
+          const rawCharacters = p.characters || [];
+          const rawUpgrades = p.houseUpgrades || { Gryffindor: [], Slytherin: [], Ravenclaw: [], Hufflepuff: [] };
+
+          // PŘÍSNÁ OCHRANA: Pokud uživatel NENÍ Admin, vyčistíme skrytá data v paměti prohlížeče
+          const isAdmin = currentUser && currentUser.role === 'ADMIN';
+
+          if (isAdmin) {
+            characters = rawCharacters.map(c => ({
+              ...c,
+              onScript: c.onScript !== undefined ? c.onScript : true,
+              visible: c.visible !== undefined ? c.visible : true
+            }));
+            houseUpgrades = rawUpgrades;
+          } else {
+            // Pro studenty a diváky fyzicky odstraníme skryté položky
+            characters = rawCharacters
+              .filter(c => c.visible !== false)
+              .map(c => ({ ...c, onScript: c.onScript !== undefined ? c.onScript : true, visible: true }));
+
+            houseUpgrades = {
+              Gryffindor: (rawUpgrades.Gryffindor || []).filter(u => u.visible !== false),
+              Slytherin: (rawUpgrades.Slytherin || []).filter(u => u.visible !== false),
+              Ravenclaw: (rawUpgrades.Ravenclaw || []).filter(u => u.visible !== false),
+              Hufflepuff: (rawUpgrades.Hufflepuff || []).filter(u => u.visible !== false)
+            };
+          }
         }
       } catch (err) {
         console.error('Chyba připojení k databázi:', err);
@@ -161,7 +182,7 @@
       }
     }
 
-    function showAppScreen() {
+    async function showAppScreen() {
       document.getElementById('login-screen').classList.add('hidden');
       document.getElementById('app-screen').classList.remove('hidden');
       document.getElementById('user-display-name').textContent = currentUser.name;
@@ -171,6 +192,8 @@
       if (currentUser.role === 'SPECTATOR') roleName = 'Divák';
       document.getElementById('user-display-role').textContent = roleName;
 
+      // Znovu přepočítáme viditelnost podle přihlášené role
+      await loadStateFromCloud();
       renderCurrentTab();
     }
 
