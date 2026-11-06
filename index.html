@@ -32,6 +32,7 @@
     let games = [];
     let polls = [];
     let housePoints = defaultHousePoints;
+    let maxHousePoints = 100; // Výchozí max bodů pro kampaň
     let activeTab = 'characters';
 
     let tempGamePlayers = [];
@@ -71,6 +72,7 @@
           games = p.games || [];
           polls = p.polls || [];
           housePoints = p.housePoints || defaultHousePoints;
+          if (p.maxHousePoints !== undefined) maxHousePoints = p.maxHousePoints;
         }
       } catch (err) {
         console.error('Chyba připojení k databázi:', err);
@@ -78,7 +80,7 @@
     }
 
     async function saveState() {
-      const payloadData = { users, characters, games, polls, housePoints };
+      const payloadData = { users, characters, games, polls, housePoints, maxHousePoints };
       try {
         const { error } = await supabaseClient
           .from('app_data')
@@ -109,14 +111,12 @@
       const inputId = document.getElementById('login-username').value.trim();
       const inputPass = document.getElementById('login-password').value.trim();
 
-      // Speciální rychlý přístup pro diváka
       if (inputId.toLowerCase() === 'divak' && inputPass === 'bradavice') {
         currentUser = users.find(u => u.role === 'SPECTATOR') || defaultUsers[0];
         showAppScreen();
         return;
       }
 
-      // Ověření přes oficiální Supabase Auth
       const { data, error } = await supabaseClient.auth.signInWithPassword({
         email: inputId,
         password: inputPass
@@ -129,13 +129,11 @@
 
       const authUser = data.user;
 
-      // Najdeme profil v JSONu podle e-mailu nebo ID ze Supabase
       let found = users.find(u => 
         (u.email && u.email.toLowerCase() === inputId.toLowerCase()) || 
         (u.id === authUser.id)
       );
 
-      // Podpora pro vytvoření hlavní administrátorské role
       if (!found && (inputId.toLowerCase() === 'mragnl@bradavice.sts' || inputId.toLowerCase() === 'minecraftpetr2001@gmail.com')) {
         found = { 
           id: authUser.id, 
@@ -548,34 +546,74 @@
       renderLeaderboard();
     }
 
+    async function setHousePointsDirect(house) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      const inputVal = prompt(`Zadejte nový celkový počet bodů pro kolej ${house}:`, housePoints[house] || 0);
+      if (inputVal === null) return;
+      const newPoints = parseInt(inputVal);
+      if (isNaN(newPoints)) return alert('Neplatné číslo!');
+      housePoints[house] = newPoints;
+      await saveState();
+      renderLeaderboard();
+    }
+
+    async function updateMaxHousePoints() {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      const val = parseInt(document.getElementById('max-points-input').value);
+      if (isNaN(val) || val <= 0) return alert('Zadejte platné číslo větší než 0!');
+      maxHousePoints = val;
+      await saveState();
+      renderLeaderboard();
+      alert('Max bodů uloženo.');
+    }
+
     function renderLeaderboard() {
       const container = document.getElementById('house-points-container');
+      const adminConfigArea = document.getElementById('admin-max-points-area');
       const isAdmin = currentUser && currentUser.role === 'ADMIN';
+
+      if (adminConfigArea) {
+        adminConfigArea.className = isAdmin ? 'mb-6 p-4 bg-gray-900 border border-yellow-600/40 rounded-xl flex items-center gap-4' : 'hidden';
+        document.getElementById('max-points-input').value = maxHousePoints;
+      }
+
       const housesMeta = {
-        Gryffindor: { name: 'Nebelvír', color: 'border-red-700 bg-red-950/30 text-red-400', icon: 'fa-shield-halved' },
-        Slytherin: { name: 'Zmijozel', color: 'border-green-700 bg-green-950/30 text-green-400', icon: 'fa-staff-snake' },
-        Ravenclaw: { name: 'Havraspár', color: 'border-blue-700 bg-blue-950/30 text-blue-400', icon: 'fa-feather' },
-        Hufflepuff: { name: 'Mrzimor', color: 'border-yellow-700 bg-yellow-950/30 text-yellow-400', icon: 'fa-sun' }
+        Gryffindor: { name: 'Nebelvír', borderColor: 'border-red-700', textColor: 'text-red-400', rgb: '127, 29, 29', icon: 'fa-shield-halved' },
+        Slytherin: { name: 'Zmijozel', borderColor: 'border-green-700', textColor: 'text-green-400', rgb: '20, 83, 45', icon: 'fa-staff-snake' },
+        Ravenclaw: { name: 'Havraspár', borderColor: 'border-blue-700', textColor: 'text-blue-400', rgb: '30, 58, 138', icon: 'fa-feather' },
+        Hufflepuff: { name: 'Mrzimor', borderColor: 'border-yellow-700', textColor: 'text-yellow-400', rgb: '113, 63, 18', icon: 'fa-sun' }
       };
 
       container.innerHTML = Object.keys(housesMeta).map(key => {
         const meta = housesMeta[key];
         const points = housePoints[key] || 0;
+        
+        // Výpočet procenta naplnění (0% až 100%)
+        let percent = maxHousePoints > 0 ? (points / maxHousePoints) * 100 : 0;
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+
+        // Dynamické pozadí: zespodu naplněno sytou barvou koleje, nahoře černé (#0b0c10)
+        const bgStyle = `background: linear-gradient(to top, rgba(${meta.rgb}, 0.65) ${percent}%, #0b0c10 ${percent}%);`;
+
         return `
-          <div class="border ${meta.color} rounded-2xl p-6 flex flex-col justify-between shadow-xl">
+          <div class="border ${meta.borderColor} rounded-2xl p-6 flex flex-col justify-between shadow-xl relative overflow-hidden" style="${bgStyle}">
             <div>
               <div class="flex items-center justify-between mb-4">
-                <h3 class="text-2xl font-bold magic-font">${meta.name}</h3>
-                <i class="fa-solid ${meta.icon} text-2xl"></i>
+                <h3 class="text-2xl font-bold magic-font ${meta.textColor}">${meta.name}</h3>
+                <i class="fa-solid ${meta.icon} text-2xl ${meta.textColor}"></i>
               </div>
-              <div class="text-4xl font-extrabold text-white mb-4 magic-font">${points} <span class="text-sm text-gray-400">bodů</span></div>
+              <div class="text-4xl font-extrabold text-white mb-2 magic-font flex items-baseline gap-2">
+                ${points} <span class="text-sm text-gray-400">bodů</span>
+              </div>
+              ${isAdmin ? `<button onclick="setHousePointsDirect('${key}')" class="text-xs text-yellow-400 hover:underline mb-4 inline-block"><i class="fa-solid fa-pen"></i> Přepsat ručně</button>` : '<div class="mb-4"></div>'}
             </div>
             ${isAdmin ? `
-              <div class="border-t border-gray-800 pt-4 grid grid-cols-4 gap-2 text-xs font-bold">
-                <button onclick="updateHousePoints('${key}', 10)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+10</button>
-                <button onclick="updateHousePoints('${key}', 50)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+50</button>
+              <div class="border-t border-gray-800/80 pt-4 grid grid-cols-4 gap-2 text-xs font-bold bg-black/40 p-2 rounded-lg">
                 <button onclick="updateHousePoints('${key}', -10)" class="bg-gray-800 hover:bg-red-900 text-red-400 py-2 rounded">-10</button>
                 <button onclick="updateHousePoints('${key}', -50)" class="bg-gray-800 hover:bg-red-900 text-red-400 py-2 rounded">-50</button>
+                <button onclick="updateHousePoints('${key}', 10)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+10</button>
+                <button onclick="updateHousePoints('${key}', 50)" class="bg-gray-800 hover:bg-green-900 text-green-400 py-2 rounded">+50</button>
               </div>
             ` : ''}
           </div>
@@ -618,6 +656,7 @@
       if (user) {
         document.getElementById('edit-user-name').value = user.name;
         document.getElementById('edit-user-stream').value = user.stream || '';
+        document.getElementById('edit-user-points').value = user.points !== undefined ? user.points : 0;
         document.getElementById('edit-user-modal').classList.remove('hidden');
       }
     }
@@ -634,6 +673,7 @@
       if (user) {
         user.name = document.getElementById('edit-user-name').value.trim();
         user.stream = document.getElementById('edit-user-stream').value.trim();
+        user.points = parseInt(document.getElementById('edit-user-points').value) || 0;
         await saveState();
         closeEditUserModal();
         renderPlayers();
@@ -709,11 +749,11 @@
                       <td class="p-3 text-right flex items-center justify-end gap-2">
                         ${p.role === 'PLAYER' ? `
                           <div class="flex items-center gap-1 bg-black/60 p-1 rounded border border-gray-800 text-xs">
-                            <button onclick="updateStudentPoints('${p.id}', 5)" class="px-2 py-0.5 bg-gray-800 text-green-400 rounded font-bold">+5</button>
                             <button onclick="updateStudentPoints('${p.id}', -5)" class="px-2 py-0.5 bg-gray-800 text-red-400 rounded font-bold">-5</button>
+                            <button onclick="updateStudentPoints('${p.id}', 5)" class="px-2 py-0.5 bg-gray-800 text-green-400 rounded font-bold">+5</button>
                           </div>
                         ` : ''}
-                        <button onclick="openEditUserModal('${p.id}')" class="text-yellow-400 p-1" title="Upravit stream"><i class="fa-solid fa-pen"></i></button>
+                        <button onclick="openEditUserModal('${p.id}')" class="text-yellow-400 p-1" title="Upravit profil a body"><i class="fa-solid fa-pen"></i></button>
                         <button onclick="deleteStudent('${p.id}')" class="text-red-400 p-1" title="Smazat"><i class="fa-solid fa-trash"></i></button>
                       </td>
                     ` : ''}
@@ -884,6 +924,11 @@
       </div>
 
       <div id="tab-content-leaderboard" class="tab-content hidden">
+        <div id="admin-max-points-area" class="hidden">
+          <label class="text-sm font-semibold text-yellow-400">Maximální možné body pro kampaň (100% náplň):</label>
+          <input type="number" id="max-points-input" min="1" class="bg-black border border-gray-700 rounded p-2 text-sm text-white w-32" value="100">
+          <button onclick="updateMaxHousePoints()" class="gold-bg text-black font-bold px-4 py-2 rounded text-sm hover:opacity-90">Uložit maximum</button>
+        </div>
         <h2 class="text-xl font-bold mb-6 magic-font">Bodování kolejí</h2>
         <div id="house-points-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div>
       </div>
@@ -913,6 +958,10 @@
         <div>
           <label class="block text-xs text-gray-400 mb-1">Odkaz na stream</label>
           <input type="url" id="edit-user-stream" placeholder="https://twitch.tv/..." class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Body hráče</label>
+          <input type="number" id="edit-user-points" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
         </div>
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
           <button type="button" onclick="closeEditUserModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded text-sm">Zrušit</button>
