@@ -29,6 +29,7 @@
     let currentUser = null;
     let users = defaultUsers;
     let characters = [];
+    let items = [];
     let games = [];
     let polls = [];
     let housePoints = defaultHousePoints;
@@ -44,6 +45,7 @@
     let editingUserId = null;
     let targetUpgradeHouse = null;
     let editingUpgradeId = null;
+    let editingItemId = null;
 
     async function loadStateFromCloud() {
       try {
@@ -71,11 +73,10 @@
           housePoints = p.housePoints || defaultHousePoints;
           if (p.maxHousePoints !== undefined) maxHousePoints = p.maxHousePoints;
 
-          // Uložení kompletních dat z cloudu
           const rawCharacters = p.characters || [];
+          const rawItems = p.items || [];
           const rawUpgrades = p.houseUpgrades || { Gryffindor: [], Slytherin: [], Ravenclaw: [], Hufflepuff: [] };
 
-          // PŘÍSNÁ OCHRANA: Pokud uživatel NENÍ Admin, vyčistíme skrytá data v paměti prohlížeče
           const isAdmin = currentUser && currentUser.role === 'ADMIN';
 
           if (isAdmin) {
@@ -84,12 +85,14 @@
               onScript: c.onScript !== undefined ? c.onScript : true,
               visible: c.visible !== undefined ? c.visible : true
             }));
+            items = rawItems;
             houseUpgrades = rawUpgrades;
           } else {
-            // Pro studenty a diváky fyzicky odstraníme skryté položky
             characters = rawCharacters
               .filter(c => c.visible !== false)
               .map(c => ({ ...c, onScript: c.onScript !== undefined ? c.onScript : true, visible: true }));
+
+            items = rawItems.filter(i => i.visible !== false);
 
             houseUpgrades = {
               Gryffindor: (rawUpgrades.Gryffindor || []).filter(u => u.visible !== false),
@@ -105,7 +108,7 @@
     }
 
     async function saveState() {
-      const payloadData = { users, characters, games, polls, housePoints, houseUpgrades, maxHousePoints };
+      const payloadData = { users, characters, items, games, polls, housePoints, houseUpgrades, maxHousePoints };
       try {
         const { error } = await supabaseClient
           .from('app_data')
@@ -138,7 +141,7 @@
 
       if (inputId.toLowerCase() === 'divak' && inputPass === 'bradavice') {
         currentUser = users.find(u => u.role === 'SPECTATOR') || defaultUsers[0];
-        showAppScreen();
+        await showAppScreen();
         return;
       }
 
@@ -176,7 +179,7 @@
 
       if (found) {
         currentUser = found;
-        showAppScreen();
+        await showAppScreen();
       } else {
         alert('Přihlášení v Auth proběhlo, ale uživatel nemá vytvořený profil v aplikaci. Požádej administrátora o registraci.');
       }
@@ -192,7 +195,6 @@
       if (currentUser.role === 'SPECTATOR') roleName = 'Divák';
       document.getElementById('user-display-role').textContent = roleName;
 
-      // Znovu přepočítáme viditelnost podle přihlášené role
       await loadStateFromCloud();
       renderCurrentTab();
     }
@@ -224,10 +226,125 @@
       if (activeContent) activeContent.classList.remove('hidden');
 
       if (activeTab === 'characters') renderCharacters();
+      if (activeTab === 'items') renderItems();
       if (activeTab === 'games') renderGames();
       if (activeTab === 'players') renderPlayers();
       if (activeTab === 'leaderboard') renderLeaderboard();
       if (activeTab === 'polls') renderPolls();
+    }
+
+    // --- ITEMY ---
+    function openItemModal(itemId = null) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      editingItemId = itemId;
+      const modalTitle = document.getElementById('item-modal-title');
+
+      if (itemId) {
+        modalTitle.textContent = 'Upravit item';
+        const item = items.find(i => i.id === itemId);
+        if (item) {
+          document.getElementById('item-name').value = item.name;
+          document.getElementById('item-desc').value = item.desc;
+          document.getElementById('item-image-url').value = item.image || '';
+          document.getElementById('item-visible').checked = item.visible !== false;
+        }
+      } else {
+        modalTitle.textContent = 'Přidat nový item';
+        document.getElementById('add-item-form').reset();
+        document.getElementById('item-visible').checked = true;
+      }
+      document.getElementById('item-modal').classList.remove('hidden');
+    }
+
+    function closeItemModal() {
+      document.getElementById('item-modal').classList.add('hidden');
+      document.getElementById('add-item-form').reset();
+      editingItemId = null;
+    }
+
+    function handleItemImageUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        document.getElementById('item-image-url').value = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function saveItem(e) {
+      e.preventDefault();
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+
+      const name = document.getElementById('item-name').value.trim();
+      const desc = document.getElementById('item-desc').value.trim();
+      const image = document.getElementById('item-image-url').value.trim();
+      const visible = document.getElementById('item-visible').checked;
+
+      if (editingItemId) {
+        const item = items.find(i => i.id === editingItemId);
+        if (item) {
+          item.name = name;
+          item.desc = desc;
+          item.image = image;
+          item.visible = visible;
+        }
+      } else {
+        items.unshift({
+          id: 'item_' + Date.now(),
+          name,
+          desc,
+          image,
+          visible
+        });
+      }
+
+      await saveState();
+      closeItemModal();
+      renderItems();
+    }
+
+    async function deleteItem(itemId) {
+      if (!currentUser || currentUser.role !== 'ADMIN') return;
+      if (confirm('Opravdu chcete smazat tento item?')) {
+        items = items.filter(i => i.id !== itemId);
+        await saveState();
+        renderItems();
+      }
+    }
+
+    function renderItems() {
+      const container = document.getElementById('items-container');
+      const isAdmin = currentUser && currentUser.role === 'ADMIN';
+      const adminBtnArea = document.getElementById('item-admin-btn-area');
+      if (adminBtnArea) adminBtnArea.className = isAdmin ? 'mb-6' : 'hidden';
+
+      let displayItems = isAdmin ? items : items.filter(i => i.visible !== false);
+      if (displayItems.length === 0) {
+        container.innerHTML = `<div class="col-span-full text-center text-gray-500 py-12">Zatím nebyly přidány žádné itemy.</div>`;
+        return;
+      }
+
+      container.innerHTML = displayItems.map(i => `
+        <div class="border ${i.visible === false ? 'border-red-900/40 bg-gray-950/40 opacity-60' : 'border-yellow-600/30 bg-gray-900/60'} rounded-xl p-5 shadow-lg relative flex flex-col justify-between">
+          <div>
+            ${isAdmin ? `
+              <div class="absolute top-4 right-4 flex gap-2 items-center">
+                ${i.visible === false ? '<span class="text-[10px] bg-red-950 text-red-400 border border-red-800 px-2 py-0.5 rounded font-semibold">Skryto</span>' : ''}
+                <button onclick="openItemModal('${i.id}')" class="text-yellow-400 hover:text-yellow-300 text-sm p-1" title="Upravit"><i class="fa-solid fa-pen"></i></button>
+                <button onclick="deleteItem('${i.id}')" class="text-red-400 hover:text-red-300 text-sm p-1" title="Smazat"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            ` : ''}
+            <div class="flex items-center space-x-4 mb-4">
+              ${i.image ? `<img src="${i.image}" class="w-16 h-16 object-contain rounded-lg border border-yellow-500/30 bg-black/60 p-1">` : `<div class="w-16 h-16 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center text-yellow-500 text-2xl"><i class="fa-solid fa-wand-magic-sparkles"></i></div>`}
+              <div>
+                <h3 class="font-bold text-lg text-white magic-font">${i.name}</h3>
+              </div>
+            </div>
+            <p class="text-sm text-gray-300 leading-relaxed">${i.desc || 'Bez popisu.'}</p>
+          </div>
+        </div>
+      `).join('');
     }
 
     // --- ANKETY ---
@@ -690,13 +807,11 @@
 
         const bgStyle = `background: linear-gradient(to top, rgba(${meta.rgb}, 0.65) ${percent}%, #0b0c10 ${percent}%);`;
 
-        // Získání vylepšení pro tuto kolej
         const allUpgrades = houseUpgrades[key] || [];
         const visibleUpgrades = isAdmin ? allUpgrades : allUpgrades.filter(u => u.visible !== false);
 
         return `
           <div class="flex flex-col gap-4">
-            <!-- Hlavní karta koleje -->
             <div class="border ${meta.borderColor} rounded-2xl p-6 flex flex-col justify-between shadow-xl relative overflow-hidden" style="${bgStyle}">
               <div>
                 <div class="flex items-center justify-between mb-4">
@@ -721,7 +836,6 @@
               ` : ''}
             </div>
 
-            <!-- Karty vylepšení pod kolejí -->
             <div class="space-y-3">
               ${visibleUpgrades.map(u => `
                 <div class="border ${meta.borderColor} bg-black/50 rounded-xl p-4 shadow-md relative ${u.visible === false ? 'opacity-60 border-dashed' : ''}">
@@ -997,6 +1111,7 @@
 
     <nav class="bg-gray-900 border-b border-gray-800 flex overflow-x-auto px-4">
       <button onclick="switchTab('characters')" id="tab-btn-characters" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-yellow-500 text-yellow-400 whitespace-nowrap">Postavy & Script</button>
+      <button onclick="switchTab('items')" id="tab-btn-items" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Itemy</button>
       <button onclick="switchTab('games')" id="tab-btn-games" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Historie her</button>
       <button onclick="switchTab('players')" id="tab-btn-players" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Studenti</button>
       <button onclick="switchTab('leaderboard')" id="tab-btn-leaderboard" class="tab-btn py-3 px-5 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 whitespace-nowrap">Bodování kolejí</button>
@@ -1010,6 +1125,14 @@
           <input type="file" accept=".json" onchange="uploadCharactersScript(event)" class="text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-yellow-500 file:text-black hover:file:bg-yellow-400 cursor-pointer">
         </div>
         <div id="characters-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+      </div>
+
+      <div id="tab-content-items" class="tab-content hidden">
+        <div id="item-admin-btn-area" class="hidden mb-6">
+          <button onclick="openItemModal()" class="gold-bg text-black font-bold px-5 py-2.5 rounded-lg hover:opacity-90 transition text-sm flex items-center gap-2"><i class="fa-solid fa-plus"></i> Přidat nový item</button>
+        </div>
+        <h2 class="text-xl font-bold mb-4 magic-font">Kouzelné předměty & Itemy</h2>
+        <div id="items-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
       </div>
 
       <div id="tab-content-games" class="tab-content hidden">
@@ -1064,6 +1187,39 @@
     </main>
   </div>
 
+  <!-- MODAL: PŘIDAT/UPRAVIT ITEM -->
+  <div id="item-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-gray-900 border border-yellow-600/40 p-6 rounded-2xl max-w-md w-full">
+      <div class="flex justify-between items-center mb-4">
+        <h3 id="item-modal-title" class="text-xl font-bold text-yellow-400 magic-font">Přidat nový item</h3>
+        <button onclick="closeItemModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+      <form id="add-item-form" onsubmit="saveItem(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Obrázek itemu</label>
+          <input type="file" accept="image/*" onchange="handleItemImageUpload(event)" class="w-full text-xs text-gray-400 file:bg-yellow-500 file:text-black rounded cursor-pointer mb-2">
+          <input type="url" id="item-image-url" placeholder="Nebo vložte URL adresu obrázku..." class="w-full bg-black border border-gray-700 rounded p-2 text-xs text-white">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Název itemu</label>
+          <input type="text" id="item-name" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Podrobný popis</label>
+          <textarea id="item-desc" rows="3" class="w-full bg-black border border-gray-700 rounded p-2.5 text-sm text-white" required></textarea>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="checkbox" id="item-visible" class="w-4 h-4 rounded bg-black border-gray-700 text-yellow-500 focus:ring-0">
+          <label for="item-visible" class="text-sm text-gray-300">Zviditelnit hráčům (odškrtnutím skryješ)</label>
+        </div>
+        <div class="flex justify-end gap-3 pt-4 border-t border-gray-800">
+          <button type="button" onclick="closeItemModal()" class="px-4 py-2 bg-gray-800 text-gray-300 rounded text-sm">Zrušit</button>
+          <button type="submit" class="px-4 py-2 gold-bg text-black font-bold rounded text-sm">Uložit item</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- MODAL: UPRAVIT UŽIVATELE -->
   <div id="edit-user-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-gray-900 border border-yellow-600/40 p-6 rounded-2xl max-w-md w-full">
@@ -1092,7 +1248,7 @@
     </div>
   </div>
 
-  <!-- MODAL: PŘIDAT/UPRAVIT VYLEPŠENÍ -->
+  <!-- MODAL: PŘIDAT/UPRAVIT VYLEPŠENÍ KOLEJE -->
   <div id="upgrade-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-gray-900 border border-yellow-600/40 p-6 rounded-2xl max-w-md w-full">
       <div class="flex justify-between items-center mb-4">
