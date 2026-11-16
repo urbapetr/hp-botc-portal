@@ -132,6 +132,21 @@
     }
 
     window.addEventListener('DOMContentLoaded', async () => {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+
+      if (session && session.user) {
+        const authUser = session.user;
+        let found = users.find(u => 
+          (u.email && u.email.toLowerCase() === authUser.email.toLowerCase()) || 
+          (u.id === authUser.id)
+        );
+
+        if (found) {
+          currentUser = found;
+          await showAppScreen();
+          return;
+        }
+      }
       await loadStateFromCloud();
       renderCurrentTab();
     });
@@ -206,8 +221,8 @@
       renderCurrentTab();
     }
 
-    function logout() {
-      supabaseClient.auth.signOut();
+    async function logout() {
+      await supabaseClient.auth.signOut();
       currentUser = null;
       document.getElementById('app-screen').classList.add('hidden');
       document.getElementById('login-screen').classList.remove('hidden');
