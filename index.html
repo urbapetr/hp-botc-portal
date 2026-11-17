@@ -132,10 +132,13 @@
     }
 
     window.addEventListener('DOMContentLoaded', async () => {
-      const { data: { session } } = await supabaseClient.auth.getSession();
+      const { data: { session }, error } = await supabaseClient.auth.getSession();
 
       if (session && session.user) {
         const authUser = session.user;
+        
+        await loadStateFromCloud();
+
         let found = users.find(u => 
           (u.email && u.email.toLowerCase() === authUser.email.toLowerCase()) || 
           (u.id === authUser.id)
@@ -143,10 +146,11 @@
 
         if (found) {
           currentUser = found;
-          await showAppScreen();
+          await showAppScreen(); 
           return;
         }
       }
+
       await loadStateFromCloud();
       renderCurrentTab();
     });
